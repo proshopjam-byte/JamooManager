@@ -1,0 +1,7 @@
+﻿node_modules/
+booking-profile/
+output/
+*.txt
+*.html
+*.png
+.env

@@ -1,0 +1,1 @@
+console.log('Jamoo Managerの準備ができました');
