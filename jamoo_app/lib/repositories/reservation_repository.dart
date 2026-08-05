@@ -1,23 +1,26 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../core/app_paths.dart';
 import '../models/reservation_data.dart';
 
 class ReservationRepository {
   const ReservationRepository({
     this.jsonFilePath,
+    this.projectRootPath,
   });
 
   final String? jsonFilePath;
-
-  static const String jsonFileName = 'reservations_latest.json';
+  final String? projectRootPath;
 
   Future<ReservationData> load() async {
     final file = await _resolveJsonFile();
 
     try {
       final bytes = await file.readAsBytes();
-      final text = _removeUtf8Bom(utf8.decode(bytes));
+      final text = _removeUtf8Bom(
+        utf8.decode(bytes),
+      );
       final decoded = jsonDecode(text);
 
       if (decoded is! Map<String, dynamic>) {
@@ -41,7 +44,8 @@ class ReservationRepository {
       );
     } catch (error) {
       throw ReservationRepositoryException(
-        '予約データの読み込み中に予期しないエラーが発生しました。\n$error',
+        '予約データの読み込み中に'
+        '予期しないエラーが発生しました。\n$error',
       );
     }
   }
@@ -50,6 +54,8 @@ class ReservationRepository {
     try {
       final file = await _resolveJsonFile();
       return file.exists();
+    } on AppPathsException {
+      return false;
     } on ReservationRepositoryException {
       return false;
     }
@@ -64,6 +70,10 @@ class ReservationRepository {
     final file = await _resolveJsonFile();
 
     try {
+      if (!await file.exists()) {
+        return null;
+      }
+
       return await file.lastModified();
     } on FileSystemException {
       return null;
@@ -71,111 +81,39 @@ class ReservationRepository {
   }
 
   Future<File> _resolveJsonFile() async {
-    final explicitPath = jsonFilePath?.trim();
+    try {
+      final paths = await AppPaths.resolve(
+        projectRootPath: projectRootPath,
+        reservationJsonPath: jsonFilePath,
+      );
 
-    if (explicitPath != null && explicitPath.isNotEmpty) {
-      final explicitFile = File(explicitPath);
+      final file = paths.reservationJson;
 
-      if (await explicitFile.exists()) {
-        return explicitFile;
+      if (await file.exists()) {
+        return file;
       }
 
       throw ReservationRepositoryException(
-        '指定された予約JSONが見つかりません。\n$explicitPath',
+        '予約JSONが見つかりません。\n'
+        '先にBooking.comから本日のチェックインを'
+        '取得してください。\n\n'
+        '${file.path}',
+      );
+    } on ReservationRepositoryException {
+      rethrow;
+    } on AppPathsException catch (error) {
+      throw ReservationRepositoryException(
+        '予約JSONの場所を確認できませんでした。\n'
+        '${error.message}',
       );
     }
-
-    final environmentPath =
-        Platform.environment['JAMOO_RESERVATIONS_JSON']?.trim();
-
-    if (environmentPath != null && environmentPath.isNotEmpty) {
-      final environmentFile = File(environmentPath);
-
-      if (await environmentFile.exists()) {
-        return environmentFile;
-      }
-    }
-
-    final searchedPaths = <String>[];
-    final startingDirectories = <Directory>[
-      Directory.current,
-      File(Platform.resolvedExecutable).parent,
-    ];
-
-    for (final startingDirectory in startingDirectories) {
-      final foundFile = await _searchUpward(
-        startingDirectory,
-        searchedPaths,
-      );
-
-      if (foundFile != null) {
-        return foundFile;
-      }
-    }
-
-    throw ReservationRepositoryException(
-      '予約JSONが見つかりません。\n'
-      '先に booking_bot で予約取得を実行してください。\n\n'
-      '検索した場所：\n${searchedPaths.join('\n')}',
-    );
   }
 
-  Future<File?> _searchUpward(
-    Directory startingDirectory,
-    List<String> searchedPaths,
-  ) async {
-    var current = startingDirectory.absolute;
-    final visitedDirectories = <String>{};
-
-    while (visitedDirectories.add(current.path)) {
-      final candidate = File(
-        _joinPath(
-          current.path,
-          [
-            'booking_bot',
-            'output',
-            jsonFileName,
-          ],
-        ),
-      );
-
-      if (!searchedPaths.contains(candidate.path)) {
-        searchedPaths.add(candidate.path);
-      }
-
-      if (await candidate.exists()) {
-        return candidate;
-      }
-
-      final parent = current.parent;
-
-      if (parent.path == current.path) {
-        break;
-      }
-
-      current = parent;
-    }
-
-    return null;
-  }
-
-  static String _joinPath(
-    String basePath,
-    List<String> parts,
+  static String _removeUtf8Bom(
+    String value,
   ) {
-    final separator = Platform.pathSeparator;
-    final cleanedBase = basePath.endsWith(separator)
-        ? basePath.substring(0, basePath.length - 1)
-        : basePath;
-
-    return [
-      cleanedBase,
-      ...parts,
-    ].join(separator);
-  }
-
-  static String _removeUtf8Bom(String value) {
-    if (value.isNotEmpty && value.codeUnitAt(0) == 0xFEFF) {
+    if (value.isNotEmpty &&
+        value.codeUnitAt(0) == 0xFEFF) {
       return value.substring(1);
     }
 
@@ -184,7 +122,9 @@ class ReservationRepository {
 }
 
 class ReservationRepositoryException implements Exception {
-  const ReservationRepositoryException(this.message);
+  const ReservationRepositoryException(
+    this.message,
+  );
 
   final String message;
 

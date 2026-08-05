@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import '../core/app_paths.dart';
+
 class BookingSyncService {
   const BookingSyncService({
     this.projectRootPath,
@@ -12,10 +14,6 @@ class BookingSyncService {
   final Duration pollInterval;
   final Duration timeout;
 
-  static const String _bookingScriptName = 'booking.js';
-  static const String _reservationJsonName =
-      'reservations_latest.json';
-
   Future<BookingSyncResult> run() async {
     if (!Platform.isWindows) {
       throw const BookingSyncException(
@@ -23,120 +21,54 @@ class BookingSyncService {
       );
     }
 
-    final rootDirectory = await _resolveProjectRoot();
-    final bookingDirectory = Directory(
-      _joinPath(
-        rootDirectory.path,
-        ['booking_bot'],
-      ),
-    );
-
-    final bookingScript = File(
-      _joinPath(
-        bookingDirectory.path,
-        [_bookingScriptName],
-      ),
-    );
-
-    if (!await bookingScript.exists()) {
-      throw BookingSyncException(
-        'Booking.com取得ファイルが見つかりません。\n'
-        '${bookingScript.path}',
-      );
-    }
+    final paths = await _resolvePaths();
 
     await _confirmNodeIsAvailable();
 
-    final jsonFile = File(
-      _joinPath(
-        bookingDirectory.path,
-        [
-          'output',
-          _reservationJsonName,
-        ],
-      ),
+    final previousSnapshot = await _readFileSnapshot(
+      paths.reservationJson,
     );
 
-    final previousSnapshot =
-        await _readFileSnapshot(jsonFile);
-
     await _launchBookingPowerShell(
-      bookingDirectory: bookingDirectory,
+      bookingDirectory: paths.bookingBotDirectory,
+      bookingScript: paths.bookingScript,
     );
 
     final updatedSnapshot = await _waitForJsonUpdate(
-      jsonFile: jsonFile,
+      jsonFile: paths.reservationJson,
       previousSnapshot: previousSnapshot,
     );
 
     return BookingSyncResult(
-      jsonFilePath: jsonFile.path,
+      jsonFilePath: paths.reservationJson.path,
       updatedAt: updatedSnapshot.modifiedAt,
     );
   }
 
-  Future<Directory> _resolveProjectRoot() async {
-    final explicitPath = projectRootPath?.trim();
+  Future<AppPaths> _resolvePaths() async {
+    try {
+      final paths = await AppPaths.resolve(
+        projectRootPath: projectRootPath,
+      );
 
-    if (explicitPath != null && explicitPath.isNotEmpty) {
-      final directory = Directory(explicitPath);
-
-      if (await _containsBookingScript(directory)) {
-        return directory.absolute;
+      if (!await paths.bookingScriptExists()) {
+        throw BookingSyncException(
+          'Booking.com取得ファイルが見つかりません。\n'
+          '${paths.bookingScript.path}',
+        );
       }
 
+      await paths.ensureOutputDirectory();
+
+      return paths;
+    } on BookingSyncException {
+      rethrow;
+    } on AppPathsException catch (error) {
       throw BookingSyncException(
-        '指定されたJamooManagerフォルダ内に'
-        'booking_bot\\booking.jsが見つかりません。\n'
-        '$explicitPath',
+        'JamooManagerのファイル場所を確認できませんでした。\n'
+        '${error.message}',
       );
     }
-
-    final startingDirectories = <Directory>[
-      Directory.current,
-      File(Platform.resolvedExecutable).parent,
-    ];
-
-    final visited = <String>{};
-
-    for (final startingDirectory in startingDirectories) {
-      var current = startingDirectory.absolute;
-
-      while (visited.add(current.path)) {
-        if (await _containsBookingScript(current)) {
-          return current;
-        }
-
-        final parent = current.parent;
-
-        if (parent.path == current.path) {
-          break;
-        }
-
-        current = parent;
-      }
-    }
-
-    throw const BookingSyncException(
-      'JamooManagerフォルダを見つけられませんでした。\n'
-      'C:\\work\\JamooManagerからアプリを起動してください。',
-    );
-  }
-
-  Future<bool> _containsBookingScript(
-    Directory directory,
-  ) {
-    final file = File(
-      _joinPath(
-        directory.path,
-        [
-          'booking_bot',
-          _bookingScriptName,
-        ],
-      ),
-    );
-
-    return file.exists();
   }
 
   Future<void> _confirmNodeIsAvailable() async {
@@ -164,18 +96,23 @@ class BookingSyncService {
 
   Future<void> _launchBookingPowerShell({
     required Directory bookingDirectory,
+    required File bookingScript,
   }) async {
     final escapedDirectory = _escapePowerShellLiteral(
       bookingDirectory.path,
     );
 
+    final scriptName = _escapePowerShellLiteral(
+      bookingScript.path.split(Platform.pathSeparator).last,
+    );
+
     final command = [
       '& {',
       "Set-Location -LiteralPath '$escapedDirectory';",
-      'node .\\booking.js;',
+      "node '.\\$scriptName';",
       r'$exitCode = $LASTEXITCODE;',
       "Write-Host '';",
-      r"if ($exitCode -eq 0) {",
+      r'if ($exitCode -eq 0) {',
       "Write-Host 'JamooManagerへの予約取込みが完了しました。';",
       '} else {',
       "Write-Host '予約取込み中にエラーが発生しました。';",
@@ -195,6 +132,8 @@ class BookingSyncService {
           'powershell.exe',
           '-NoLogo',
           '-NoProfile',
+          '-ExecutionPolicy',
+          'Bypass',
           '-Command',
           command,
         ],
@@ -218,16 +157,16 @@ class BookingSyncService {
     while (stopwatch.elapsed < timeout) {
       await Future<void>.delayed(pollInterval);
 
-      final currentSnapshot =
-          await _readFileSnapshot(jsonFile);
+      final currentSnapshot = await _readFileSnapshot(
+        jsonFile,
+      );
 
       if (currentSnapshot == null) {
         continue;
       }
 
       if (previousSnapshot == null ||
-          currentSnapshot.content !=
-              previousSnapshot.content ||
+          currentSnapshot.content != previousSnapshot.content ||
           currentSnapshot.modifiedAt.isAfter(
             previousSnapshot.modifiedAt,
           )) {
@@ -268,21 +207,6 @@ class BookingSyncService {
     String value,
   ) {
     return value.replaceAll("'", "''");
-  }
-
-  static String _joinPath(
-    String basePath,
-    List<String> parts,
-  ) {
-    final separator = Platform.pathSeparator;
-    final normalizedBase = basePath.endsWith(separator)
-        ? basePath.substring(0, basePath.length - 1)
-        : basePath;
-
-    return [
-      normalizedBase,
-      ...parts,
-    ].join(separator);
   }
 }
 

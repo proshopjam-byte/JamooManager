@@ -5,6 +5,8 @@ class ReservationData {
     required this.schemaVersion,
     required this.generatedAt,
     required this.source,
+    required this.scope,
+    required this.targetDate,
     required this.count,
     required this.reservations,
   });
@@ -12,6 +14,18 @@ class ReservationData {
   final int schemaVersion;
   final DateTime? generatedAt;
   final String source;
+
+  /// 取得範囲。
+  ///
+  /// 現在のBooking.com取得処理では
+  /// `today_checkins` が入ります。
+  final String? scope;
+
+  /// 取得対象日。
+  ///
+  /// JSONでは `2026-08-05` のような形式です。
+  final DateTime? targetDate;
+
   final int count;
   final List<Reservation> reservations;
 
@@ -37,9 +51,13 @@ class ReservationData {
     final declaredCount = _readNullableInt(json['count']);
 
     return ReservationData(
-      schemaVersion: _readNullableInt(json['schemaVersion']) ?? 1,
-      generatedAt: _readNullableDateTime(json['generatedAt']),
+      schemaVersion:
+          _readNullableInt(json['schemaVersion']) ?? 1,
+      generatedAt:
+          _readNullableDateTime(json['generatedAt']),
       source: _readRequiredString(json, 'source'),
+      scope: _readNullableString(json['scope']),
+      targetDate: _readNullableDate(json['targetDate']),
       count: declaredCount ?? reservations.length,
       reservations: reservations,
     );
@@ -50,6 +68,8 @@ class ReservationData {
       'schemaVersion': schemaVersion,
       'generatedAt': generatedAt?.toIso8601String(),
       'source': source,
+      'scope': scope,
+      'targetDate': _dateToJson(targetDate),
       'count': reservations.length,
       'reservations': reservations
           .map((reservation) => reservation.toJson())
@@ -60,6 +80,40 @@ class ReservationData {
   bool get isEmpty => reservations.isEmpty;
 
   bool get isNotEmpty => reservations.isNotEmpty;
+
+  bool get isTodayCheckIns =>
+      scope == 'today_checkins';
+
+  bool get hasTargetDate => targetDate != null;
+
+  bool get isForToday {
+    final date = targetDate;
+
+    if (date == null) {
+      return false;
+    }
+
+    final now = DateTime.now();
+
+    return date.year == now.year &&
+        date.month == now.month &&
+        date.day == now.day;
+  }
+
+  bool get isStale {
+    final generated = generatedAt;
+
+    if (generated == null) {
+      return true;
+    }
+
+    final now = DateTime.now();
+    final localGenerated = generated.toLocal();
+
+    return localGenerated.year != now.year ||
+        localGenerated.month != now.month ||
+        localGenerated.day != now.day;
+  }
 
   int get totalGuests {
     return reservations.fold<int>(
@@ -98,7 +152,8 @@ class ReservationData {
         return -1;
       }
 
-      final dateComparison = firstDate.compareTo(secondDate);
+      final dateComparison =
+          firstDate.compareTo(secondDate);
 
       if (dateComparison != 0) {
         return dateComparison;
@@ -113,7 +168,11 @@ class ReservationData {
   }
 
   List<Reservation> reservationsForDate(DateTime date) {
-    final target = DateTime(date.year, date.month, date.day);
+    final target = DateTime(
+      date.year,
+      date.month,
+      date.day,
+    );
 
     return reservations.where((reservation) {
       final checkIn = reservation.checkIn;
@@ -135,7 +194,8 @@ class ReservationData {
         checkOut.day,
       );
 
-      return !target.isBefore(start) && target.isBefore(end);
+      return !target.isBefore(start) &&
+          target.isBefore(end);
     }).toList(growable: false);
   }
 
@@ -161,19 +221,24 @@ class ReservationData {
     Map<String, dynamic> json,
     String key,
   ) {
-    final value = json[key];
+    final value = _readNullableString(json[key]);
 
     if (value == null) {
       throw FormatException('$key がありません。');
     }
 
-    final text = value.toString().trim();
+    return value;
+  }
 
-    if (text.isEmpty) {
-      throw FormatException('$key が空です。');
+  static String? _readNullableString(
+    dynamic value,
+  ) {
+    if (value == null) {
+      return null;
     }
 
-    return text;
+    final text = value.toString().trim();
+    return text.isEmpty ? null : text;
   }
 
   static int? _readNullableInt(dynamic value) {
@@ -192,17 +257,46 @@ class ReservationData {
     return int.tryParse(value.toString());
   }
 
-  static DateTime? _readNullableDateTime(dynamic value) {
-    if (value == null) {
-      return null;
-    }
+  static DateTime? _readNullableDateTime(
+    dynamic value,
+  ) {
+    final text = _readNullableString(value);
 
-    final text = value.toString().trim();
-
-    if (text.isEmpty) {
+    if (text == null) {
       return null;
     }
 
     return DateTime.tryParse(text);
+  }
+
+  static DateTime? _readNullableDate(
+    dynamic value,
+  ) {
+    final parsed = _readNullableDateTime(value);
+
+    if (parsed == null) {
+      return null;
+    }
+
+    return DateTime(
+      parsed.year,
+      parsed.month,
+      parsed.day,
+    );
+  }
+
+  static String? _dateToJson(DateTime? value) {
+    if (value == null) {
+      return null;
+    }
+
+    final year =
+        value.year.toString().padLeft(4, '0');
+    final month =
+        value.month.toString().padLeft(2, '0');
+    final day =
+        value.day.toString().padLeft(2, '0');
+
+    return '$year-$month-$day';
   }
 }
