@@ -5,3 +5,4 @@ output/
 *.html
 *.png
 .env
+dist/
