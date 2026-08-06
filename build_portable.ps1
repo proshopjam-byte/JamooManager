@@ -7,6 +7,8 @@ $releaseRoot = Join-Path $appRoot "build\windows\x64\runner\Release"
 $distRoot = Join-Path $repoRoot "dist"
 $packageRoot = Join-Path $distRoot "JamooManager"
 $zipPath = Join-Path $distRoot "JamooManager_Windows_Portable.zip"
+$exeName = "JamooManager.exe"
+$exePath = Join-Path $releaseRoot $exeName
 
 Write-Host ""
 Write-Host "========================================"
@@ -22,13 +24,11 @@ if (-not (Test-Path -LiteralPath $bookingBotRoot)) {
     throw "booking_bot フォルダが見つかりません。 $bookingBotRoot"
 }
 
-if (-not (Test-Path -LiteralPath $releaseRoot)) {
+if (-not (Test-Path -LiteralPath $exePath)) {
     Write-Host "Windows完成版が見つからないため、ビルドします。"
-
     Push-Location $appRoot
     try {
         & flutter build windows --release
-
         if ($LASTEXITCODE -ne 0) {
             throw "FlutterのWindowsビルドに失敗しました。"
         }
@@ -36,6 +36,10 @@ if (-not (Test-Path -LiteralPath $releaseRoot)) {
     finally {
         Pop-Location
     }
+}
+
+if (-not (Test-Path -LiteralPath $exePath)) {
+    throw "JamooManager.exe が作成されていません。 $exePath"
 }
 
 if (-not (Test-Path -LiteralPath $distRoot)) {
@@ -55,11 +59,7 @@ New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
 Write-Host "アプリ本体をコピーしています..."
 
 Get-ChildItem -LiteralPath $releaseRoot | ForEach-Object {
-    Copy-Item `
-        -LiteralPath $_.FullName `
-        -Destination $packageRoot `
-        -Recurse `
-        -Force
+    Copy-Item -LiteralPath $_.FullName -Destination $packageRoot -Recurse -Force
 }
 
 $portableBotRoot = Join-Path $packageRoot "booking_bot"
@@ -75,12 +75,8 @@ $bookingFiles = @(
 
 foreach ($fileName in $bookingFiles) {
     $sourcePath = Join-Path $bookingBotRoot $fileName
-
     if (Test-Path -LiteralPath $sourcePath) {
-        Copy-Item `
-            -LiteralPath $sourcePath `
-            -Destination $portableBotRoot `
-            -Force
+        Copy-Item -LiteralPath $sourcePath -Destination $portableBotRoot -Force
     }
 }
 
@@ -97,7 +93,6 @@ $setupLines = @(
     'echo  JamooManager 初回セットアップ',
     'echo ========================================',
     'echo.',
-    '',
     'where node >nul 2>&1',
     'if errorlevel 1 (',
     '    echo Node.jsが見つかりません。',
@@ -108,7 +103,6 @@ $setupLines = @(
     ')',
     '',
     'cd /d "%~dp0booking_bot"',
-    '',
     'echo Playwrightをインストールしています...',
     'call npm.cmd install',
     'if errorlevel 1 (',
@@ -136,21 +130,19 @@ $setupLines = @(
     'pause'
 )
 
-$setupFile = Join-Path $packageRoot "初回セットアップ.cmd"
 Set-Content `
-    -LiteralPath $setupFile `
+    -LiteralPath (Join-Path $packageRoot "初回セットアップ.cmd") `
     -Value $setupLines `
     -Encoding UTF8
 
 $launcherLines = @(
     '@echo off',
     'cd /d "%~dp0"',
-    'start "" "%~dp0jamoo_app.exe"'
+    'start "" "%~dp0JamooManager.exe"'
 )
 
-$launcherFile = Join-Path $packageRoot "JamooManagerを起動.cmd"
 Set-Content `
-    -LiteralPath $launcherFile `
+    -LiteralPath (Join-Path $packageRoot "JamooManagerを起動.cmd") `
     -Value $launcherLines `
     -Encoding ASCII
 
@@ -173,16 +165,15 @@ $readmeLines = @(
     '',
     '【重要】',
     '',
-    '・jamoo_app.exeだけを単独で移動しないでください。',
+    '・JamooManager.exeだけを単独で移動しないでください。',
     '・このフォルダ内のファイルとフォルダは、一式のまま使用してください。',
     '・予約サイトの画面変更により、取得処理の修正が必要になる場合があります。',
     '・予約データは booking_bot\output に保存されます。',
     '・ログイン情報を含む booking-profile は配布ZIPには含めていません。'
 )
 
-$readmeFile = Join-Path $packageRoot "はじめにお読みください.txt"
 Set-Content `
-    -LiteralPath $readmeFile `
+    -LiteralPath (Join-Path $packageRoot "はじめにお読みください.txt") `
     -Value $readmeLines `
     -Encoding UTF8
 
