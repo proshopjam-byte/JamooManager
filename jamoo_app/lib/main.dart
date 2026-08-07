@@ -142,8 +142,8 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
               'JamooManagerの中央データベースを'
               '作成できませんでした。\n\n'
               '$error\n\n'
-              '現在のBooking.com JSON表示機能は'
-              '引き続き利用できます。',
+              '設定と保存先を確認してから、'
+              'アプリを再起動してください。',
         );
       });
     }
@@ -293,7 +293,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
             ),
           ),
           IconButton(
-            tooltip: 'JSONを再読込',
+            tooltip: '一覧を再読込',
             onPressed: _isSyncing || _isLoadingSettings ? null : _reload,
             icon: const Icon(Icons.refresh),
           ),
@@ -377,7 +377,7 @@ class _SyncingBanner extends StatelessWidget {
                 child: Text(
                   '別画面で$bookingSourceNameの操作を'
                   '完了してください。'
-                  'JSONが更新されると自動で画面を更新します。',
+                  '取得後にデータベースへ保存し、画面を更新します。',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ),
@@ -535,7 +535,7 @@ class _EmptyView extends StatelessWidget {
                       OutlinedButton.icon(
                         onPressed: isSyncing ? null : onReload,
                         icon: const Icon(Icons.refresh),
-                        label: const Text('JSONを再読込'),
+                        label: const Text('一覧を再読込'),
                       ),
                     ],
                   ),
@@ -619,7 +619,7 @@ class _OldDataWarning extends StatelessWidget {
     final reasons = <String>[];
 
     if (!data.isTodayCheckIns) {
-      reasons.add('このJSONは「当日チェックイン専用」の形式ではありません。');
+      reasons.add('表示データが「当日チェックイン専用」の形式ではありません。');
     }
 
     if (!data.isForToday) {
