@@ -4,9 +4,12 @@ import 'models/app_settings.dart';
 import 'models/reservation.dart';
 import 'models/reservation_data.dart';
 import 'pages/settings_page.dart';
+import 'repositories/database_reservation_repository.dart';
 import 'repositories/reservation_repository.dart';
 import 'repositories/settings_repository.dart';
 import 'services/booking_sync_service.dart';
+import 'services/database_service.dart';
+import 'services/reservation_import_service.dart';
 
 void main() {
   runApp(const JamooManagerApp());
@@ -21,9 +24,7 @@ class JamooManagerApp extends StatelessWidget {
       title: AppSettings.defaults.appName,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF386641),
-        ),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF386641)),
         useMaterial3: true,
       ),
       home: const TodayCheckInPage(),
@@ -35,13 +36,11 @@ class TodayCheckInPage extends StatefulWidget {
   const TodayCheckInPage({super.key});
 
   @override
-  State<TodayCheckInPage> createState() =>
-      _TodayCheckInPageState();
+  State<TodayCheckInPage> createState() => _TodayCheckInPageState();
 }
 
 class _TodayCheckInPageState extends State<TodayCheckInPage> {
-  final SettingsRepository _settingsRepository =
-      const SettingsRepository();
+  final SettingsRepository _settingsRepository = const SettingsRepository();
 
   Future<ReservationData>? _reservationDataFuture;
 
@@ -49,9 +48,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
   bool _isSyncing = false;
   bool _isLoadingSettings = true;
 
-  ReservationRepository _createReservationRepository({
-    AppSettings? settings,
-  }) {
+  ReservationRepository _createReservationRepository({AppSettings? settings}) {
     final targetSettings = settings ?? _settings;
 
     return ReservationRepository(
@@ -59,10 +56,12 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
     );
   }
 
+  Future<ReservationData> _loadTodayCheckIns() {
+    return const DatabaseReservationRepository().loadTodayCheckIns();
+  }
+
   BookingSyncService _createBookingSyncService() {
-    return BookingSyncService(
-      projectRootPath: _settings.managerRootPath,
-    );
+    return BookingSyncService(projectRootPath: _settings.managerRootPath);
   }
 
   @override
@@ -72,6 +71,8 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
   }
 
   Future<void> _initialize() async {
+    await _initializeDatabase();
+
     try {
       final settings = await _settingsRepository.load();
 
@@ -82,10 +83,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
       setState(() {
         _settings = settings;
         _isLoadingSettings = false;
-        _reservationDataFuture =
-            _createReservationRepository(
-          settings: settings,
-        ).load();
+        _reservationDataFuture = _loadTodayCheckIns();
       });
     } on SettingsRepositoryException catch (error) {
       if (!mounted) {
@@ -95,16 +93,12 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
       setState(() {
         _settings = AppSettings.defaults;
         _isLoadingSettings = false;
-        _reservationDataFuture =
-            _createReservationRepository().load();
+        _reservationDataFuture = _loadTodayCheckIns();
       });
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
-          _showErrorDialog(
-            title: '設定を読み込めませんでした',
-            message: error.message,
-          );
+          _showErrorDialog(title: '設定を読み込めませんでした', message: error.message);
         }
       });
     } catch (error) {
@@ -115,8 +109,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
       setState(() {
         _settings = AppSettings.defaults;
         _isLoadingSettings = false;
-        _reservationDataFuture =
-            _createReservationRepository().load();
+        _reservationDataFuture = _loadTodayCheckIns();
       });
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -130,25 +123,47 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
     }
   }
 
+  Future<void> _initializeDatabase() async {
+    try {
+      await DatabaseService.instance.database;
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) {
+          return;
+        }
+
+        _showErrorDialog(
+          title: 'データベースを初期化できませんでした',
+          message:
+              'JamooManagerの中央データベースを'
+              '作成できませんでした。\n\n'
+              '$error\n\n'
+              '現在のBooking.com JSON表示機能は'
+              '引き続き利用できます。',
+        );
+      });
+    }
+  }
+
   void _reload() {
     if (_isLoadingSettings) {
       return;
     }
 
     setState(() {
-      _reservationDataFuture =
-          _createReservationRepository().load();
+      _reservationDataFuture = _loadTodayCheckIns();
     });
   }
 
   Future<void> _openSettings() async {
-    final updatedSettings =
-        await Navigator.of(context).push<AppSettings>(
+    final updatedSettings = await Navigator.of(context).push<AppSettings>(
       MaterialPageRoute(
         builder: (context) {
-          return SettingsPage(
-            initialSettings: _settings,
-          );
+          return SettingsPage(initialSettings: _settings);
         },
       ),
     );
@@ -159,19 +174,12 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
 
     setState(() {
       _settings = updatedSettings;
-      _reservationDataFuture =
-          _createReservationRepository(
-        settings: updatedSettings,
-      ).load();
+      _reservationDataFuture = _loadTodayCheckIns();
     });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          '設定を保存し、データ保存場所を反映しました。',
-        ),
-      ),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('設定を保存し、データ保存場所を反映しました。')));
   }
 
   Future<void> _syncFromBooking() async {
@@ -187,20 +195,26 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
       final syncService = _createBookingSyncService();
       await syncService.run();
 
+      final repository = _createReservationRepository();
+      final reservationData = await repository.load();
+
+      final importResult = await const ReservationImportService()
+          .importReservationData(reservationData);
+
       if (!mounted) {
         return;
       }
 
       setState(() {
-        _reservationDataFuture =
-            _createReservationRepository().load();
+        _reservationDataFuture = _loadTodayCheckIns();
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             '${_settings.bookingSourceName}から'
-            '本日のチェックインを取得しました。',
+            '本日のチェックインを取得しました。\n'
+            '${importResult.summary}',
           ),
         ),
       );
@@ -210,8 +224,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
       }
 
       await _showErrorDialog(
-        title:
-            '${_settings.bookingSourceName}から取得できませんでした',
+        title: '${_settings.bookingSourceName}から取得できませんでした',
         message: error.message,
       );
     } catch (error) {
@@ -257,8 +270,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
 
   @override
   Widget build(BuildContext context) {
-    final syncButtonText =
-        '${_settings.bookingSourceName}から取得';
+    final syncButtonText = '${_settings.bookingSourceName}から取得';
 
     return Scaffold(
       appBar: AppBar(
@@ -267,40 +279,27 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: FilledButton.icon(
-              onPressed:
-                  _isSyncing || _isLoadingSettings
-                      ? null
-                      : _syncFromBooking,
+              onPressed: _isSyncing || _isLoadingSettings
+                  ? null
+                  : _syncFromBooking,
               icon: _isSyncing
                   ? const SizedBox(
                       width: 18,
                       height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                      ),
+                      child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Icon(
-                      Icons.cloud_download_outlined,
-                    ),
-              label: Text(
-                _isSyncing
-                    ? '取得処理中'
-                    : syncButtonText,
-              ),
+                  : const Icon(Icons.cloud_download_outlined),
+              label: Text(_isSyncing ? '取得処理中' : syncButtonText),
             ),
           ),
           IconButton(
             tooltip: 'JSONを再読込',
-            onPressed:
-                _isSyncing || _isLoadingSettings
-                    ? null
-                    : _reload,
+            onPressed: _isSyncing || _isLoadingSettings ? null : _reload,
             icon: const Icon(Icons.refresh),
           ),
           IconButton(
             tooltip: '設定',
-            onPressed:
-                _isLoadingSettings ? null : _openSettings,
+            onPressed: _isLoadingSettings ? null : _openSettings,
             icon: const Icon(Icons.settings_outlined),
           ),
           const SizedBox(width: 4),
@@ -308,23 +307,18 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
       ),
       body: Stack(
         children: [
-          if (_isLoadingSettings ||
-              _reservationDataFuture == null)
+          if (_isLoadingSettings || _reservationDataFuture == null)
             const _LoadingView()
           else
             FutureBuilder<ReservationData>(
               future: _reservationDataFuture,
               builder: (context, snapshot) {
-                if (snapshot.connectionState ==
-                    ConnectionState.waiting) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
                   return const _LoadingView();
                 }
 
                 if (snapshot.hasError) {
-                  return _ErrorView(
-                    error: snapshot.error,
-                    onRetry: _reload,
-                  );
+                  return _ErrorView(error: snapshot.error, onRetry: _reload);
                 }
 
                 final data = snapshot.data;
@@ -349,10 +343,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
               },
             ),
           if (_isSyncing)
-            _SyncingBanner(
-              bookingSourceName:
-                  _settings.bookingSourceName,
-            ),
+            _SyncingBanner(bookingSourceName: _settings.bookingSourceName),
         ],
       ),
     );
@@ -360,9 +351,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
 }
 
 class _SyncingBanner extends StatelessWidget {
-  const _SyncingBanner({
-    required this.bookingSourceName,
-  });
+  const _SyncingBanner({required this.bookingSourceName});
 
   final String bookingSourceName;
 
@@ -375,18 +364,13 @@ class _SyncingBanner extends StatelessWidget {
       child: Card(
         elevation: 8,
         child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 18,
-            vertical: 14,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
           child: Row(
             children: [
               const SizedBox(
                 width: 22,
                 height: 22,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.5,
-                ),
+                child: CircularProgressIndicator(strokeWidth: 2.5),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -394,9 +378,7 @@ class _SyncingBanner extends StatelessWidget {
                   '別画面で$bookingSourceNameの操作を'
                   '完了してください。'
                   'JSONが更新されると自動で画面を更新します。',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodyMedium,
+                  style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ),
             ],
@@ -426,10 +408,7 @@ class _LoadingView extends StatelessWidget {
 }
 
 class _ErrorView extends StatelessWidget {
-  const _ErrorView({
-    required this.error,
-    required this.onRetry,
-  });
+  const _ErrorView({required this.error, required this.onRetry});
 
   final Object? error;
   final VoidCallback onRetry;
@@ -454,23 +433,16 @@ class _ErrorView extends StatelessWidget {
                   Icon(
                     Icons.error_outline,
                     size: 56,
-                    color: Theme.of(context)
-                        .colorScheme
-                        .error,
+                    color: Theme.of(context).colorScheme.error,
                   ),
                   const SizedBox(height: 16),
                   Text(
                     '本日のチェックインを開けませんでした',
-                    style: Theme.of(context)
-                        .textTheme
-                        .headlineSmall,
+                    style: Theme.of(context).textTheme.headlineSmall,
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 16),
-                  SelectableText(
-                    message,
-                    textAlign: TextAlign.center,
-                  ),
+                  SelectableText(message, textAlign: TextAlign.center),
                   const SizedBox(height: 24),
                   FilledButton.icon(
                     onPressed: onRetry,
@@ -505,8 +477,7 @@ class _EmptyView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final todayText = _formatToday();
-    final generatedAtText =
-        _formatDateTime(generatedAt);
+    final generatedAtText = _formatDateTime(generatedAt);
 
     return Center(
       child: SingleChildScrollView(
@@ -515,55 +486,39 @@ class _EmptyView extends StatelessWidget {
           constraints: const BoxConstraints(maxWidth: 650),
           child: Card(
             child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 28,
-                vertical: 36,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     settings.facilityName,
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleLarge,
+                    style: Theme.of(context).textTheme.titleLarge,
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 18),
                   Icon(
                     Icons.event_available,
                     size: 72,
-                    color: Theme.of(context)
-                        .colorScheme
-                        .primary,
+                    color: Theme.of(context).colorScheme.primary,
                   ),
                   const SizedBox(height: 18),
                   Text(
                     todayText,
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium,
+                    style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 10),
                   Text(
                     '本日のチェックインは0件です',
-                    style: Theme.of(context)
-                        .textTheme
-                        .headlineSmall,
+                    style: Theme.of(context).textTheme.headlineSmall,
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 10),
-                  const Text(
-                    '本日到着予定のお客様はいません。',
-                    textAlign: TextAlign.center,
-                  ),
+                  const Text('本日到着予定のお客様はいません。', textAlign: TextAlign.center),
                   if (generatedAtText != null) ...[
                     const SizedBox(height: 20),
                     Text(
                       '最終取得：$generatedAtText',
-                      style: Theme.of(context)
-                          .textTheme
-                          .bodySmall,
+                      style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
                   const SizedBox(height: 26),
@@ -573,18 +528,12 @@ class _EmptyView extends StatelessWidget {
                     alignment: WrapAlignment.center,
                     children: [
                       FilledButton.icon(
-                        onPressed:
-                            isSyncing ? null : onSync,
-                        icon: const Icon(
-                          Icons.cloud_download_outlined,
-                        ),
-                        label: Text(
-                          '${settings.bookingSourceName}から取得',
-                        ),
+                        onPressed: isSyncing ? null : onSync,
+                        icon: const Icon(Icons.cloud_download_outlined),
+                        label: Text('${settings.bookingSourceName}から取得'),
                       ),
                       OutlinedButton.icon(
-                        onPressed:
-                            isSyncing ? null : onReload,
+                        onPressed: isSyncing ? null : onReload,
                         icon: const Icon(Icons.refresh),
                         label: const Text('JSONを再読込'),
                       ),
@@ -624,42 +573,23 @@ class _TodayCheckInBody extends StatelessWidget {
         onReload();
       },
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(
-          16,
-          16,
-          16,
-          90,
-        ),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
         children: [
-          if (!data.isTodayCheckIns ||
-              !data.isForToday ||
-              data.isStale) ...[
+          if (!data.isTodayCheckIns || !data.isForToday || data.isStale) ...[
             _OldDataWarning(
               data: data,
-              bookingSourceName:
-                  settings.bookingSourceName,
+              bookingSourceName: settings.bookingSourceName,
               onSync: onSync,
               isSyncing: isSyncing,
             ),
             const SizedBox(height: 16),
           ],
-          _SummaryPanel(
-            data: data,
-            settings: settings,
-          ),
+          _SummaryPanel(data: data, settings: settings),
           const SizedBox(height: 18),
-          Text(
-            '本日到着のお客様',
-            style: Theme.of(context)
-                .textTheme
-                .titleLarge,
-          ),
+          Text('本日到着のお客様', style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 10),
           for (final reservation in reservations) ...[
-            _ReservationCard(
-              reservation: reservation,
-              settings: settings,
-            ),
+            _ReservationCard(reservation: reservation, settings: settings),
             const SizedBox(height: 10),
           ],
         ],
@@ -667,7 +597,6 @@ class _TodayCheckInBody extends StatelessWidget {
     );
   }
 }
-
 
 class _OldDataWarning extends StatelessWidget {
   const _OldDataWarning({
@@ -685,15 +614,12 @@ class _OldDataWarning extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final targetDateText = _formatDate(data.targetDate);
-    final generatedAtText =
-        _formatDateTime(data.generatedAt);
+    final generatedAtText = _formatDateTime(data.generatedAt);
 
     final reasons = <String>[];
 
     if (!data.isTodayCheckIns) {
-      reasons.add(
-        'このJSONは「当日チェックイン専用」の形式ではありません。',
-      );
+      reasons.add('このJSONは「当日チェックイン専用」の形式ではありません。');
     }
 
     if (!data.isForToday) {
@@ -713,64 +639,45 @@ class _OldDataWarning extends StatelessWidget {
     }
 
     return Card(
-      color: Theme.of(context)
-          .colorScheme
-          .errorContainer,
+      color: Theme.of(context).colorScheme.errorContainer,
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Row(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Icon(
               Icons.warning_amber_rounded,
               size: 30,
-              color: Theme.of(context)
-                  .colorScheme
-                  .onErrorContainer,
+              color: Theme.of(context).colorScheme.onErrorContainer,
             ),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     '表示中の予約データは本日分ではありません',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
-                        ?.copyWith(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onErrorContainer,
-                          fontWeight: FontWeight.w700,
-                        ),
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onErrorContainer,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   for (final reason in reasons)
                     Padding(
-                      padding:
-                          const EdgeInsets.only(bottom: 4),
+                      padding: const EdgeInsets.only(bottom: 4),
                       child: Text(
                         '・$reason',
                         style: TextStyle(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onErrorContainer,
+                          color: Theme.of(context).colorScheme.onErrorContainer,
                         ),
                       ),
                     ),
                   const SizedBox(height: 12),
                   FilledButton.icon(
-                    onPressed:
-                        isSyncing ? null : onSync,
-                    icon: const Icon(
-                      Icons.cloud_download_outlined,
-                    ),
-                    label: Text(
-                      '$bookingSourceNameから本日分を取得',
-                    ),
+                    onPressed: isSyncing ? null : onSync,
+                    icon: const Icon(Icons.cloud_download_outlined),
+                    label: Text('$bookingSourceNameから本日分を取得'),
                   ),
                 ],
               ),
@@ -783,47 +690,33 @@ class _OldDataWarning extends StatelessWidget {
 }
 
 class _SummaryPanel extends StatelessWidget {
-  const _SummaryPanel({
-    required this.data,
-    required this.settings,
-  });
+  const _SummaryPanel({required this.data, required this.settings});
 
   final ReservationData data;
   final AppSettings settings;
 
   @override
   Widget build(BuildContext context) {
-    final generatedAtText =
-        _formatDateTime(data.generatedAt);
+    final generatedAtText = _formatDateTime(data.generatedAt);
 
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               settings.facilityName,
-              style: Theme.of(context)
-                  .textTheme
-                  .titleLarge,
+              style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 10),
             Row(
               children: [
-                Icon(
-                  Icons.login,
-                  color: Theme.of(context)
-                      .colorScheme
-                      .primary,
-                ),
+                Icon(Icons.login, color: Theme.of(context).colorScheme.primary),
                 const SizedBox(width: 8),
                 Text(
                   _formatToday(),
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium,
+                  style: Theme.of(context).textTheme.titleMedium,
                 ),
               ],
             ),
@@ -845,9 +738,7 @@ class _SummaryPanel extends StatelessWidget {
                 if (settings.showPrice)
                   _SummaryItem(
                     label: '予約金額',
-                    value: _formatYen(
-                      data.totalPriceYen,
-                    ),
+                    value: _formatYen(data.totalPriceYen),
                     icon: Icons.payments_outlined,
                   ),
               ],
@@ -856,9 +747,7 @@ class _SummaryPanel extends StatelessWidget {
               const SizedBox(height: 14),
               Text(
                 '最終取得：$generatedAtText',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall,
+                style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
           ],
@@ -882,17 +771,10 @@ class _SummaryItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      constraints: const BoxConstraints(
-        minWidth: 150,
-      ),
-      padding: const EdgeInsets.symmetric(
-        horizontal: 14,
-        vertical: 12,
-      ),
+      constraints: const BoxConstraints(minWidth: 150),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: Theme.of(context)
-            .colorScheme
-            .surfaceContainerHighest,
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -901,21 +783,10 @@ class _SummaryItem extends StatelessWidget {
           Icon(icon),
           const SizedBox(width: 10),
           Column(
-            crossAxisAlignment:
-                CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                label,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall,
-              ),
-              Text(
-                value,
-                style: Theme.of(context)
-                    .textTheme
-                    .titleMedium,
-              ),
+              Text(label, style: Theme.of(context).textTheme.bodySmall),
+              Text(value, style: Theme.of(context).textTheme.titleMedium),
             ],
           ),
         ],
@@ -925,58 +796,42 @@ class _SummaryItem extends StatelessWidget {
 }
 
 class _ReservationCard extends StatelessWidget {
-  const _ReservationCard({
-    required this.reservation,
-    required this.settings,
-  });
+  const _ReservationCard({required this.reservation, required this.settings});
 
   final Reservation reservation;
   final AppSettings settings;
 
   @override
   Widget build(BuildContext context) {
-    final arrivalTime =
-        reservation.arrivalTime?.trim();
-    final reservationNumber =
-        reservation.reservationNumber?.trim();
+    final arrivalTime = reservation.arrivalTime?.trim();
+    final reservationNumber = reservation.reservationNumber?.trim();
 
     return Card(
       clipBehavior: Clip.antiAlias,
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 CircleAvatar(
-                  child: Text(
-                    _initial(
-                      reservation.displayGuestName,
-                    ),
-                  ),
+                  child: Text(_initial(reservation.displayGuestName)),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
-                    crossAxisAlignment:
-                        CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         reservation.displayGuestName,
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium,
+                        style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 3),
                       Text(
                         reservation.displayRoomName,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodyMedium,
+                        style: Theme.of(context).textTheme.bodyMedium,
                       ),
                     ],
                   ),
@@ -984,9 +839,7 @@ class _ReservationCard extends StatelessWidget {
                 if (settings.showPrice)
                   Text(
                     reservation.displayPrice,
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium,
+                    style: Theme.of(context).textTheme.titleMedium,
                   ),
               ],
             ),
@@ -1004,10 +857,7 @@ class _ReservationCard extends StatelessWidget {
                 arrivalTime != null &&
                 arrivalTime.isNotEmpty) ...[
               const SizedBox(height: 8),
-              _InformationRow(
-                icon: Icons.schedule,
-                label: '到着予定 $arrivalTime',
-              ),
+              _InformationRow(icon: Icons.schedule, label: '到着予定 $arrivalTime'),
             ],
             if (settings.showReservationNumber &&
                 reservationNumber != null &&
@@ -1036,10 +886,7 @@ class _ReservationCard extends StatelessWidget {
 }
 
 class _InformationRow extends StatelessWidget {
-  const _InformationRow({
-    required this.icon,
-    required this.label,
-  });
+  const _InformationRow({required this.icon, required this.label});
 
   final IconData icon;
   final String label;
@@ -1047,20 +894,11 @@ class _InformationRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      crossAxisAlignment:
-          CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(
-          icon,
-          size: 20,
-          color: Theme.of(context)
-              .colorScheme
-              .primary,
-        ),
+        Icon(icon, size: 20, color: Theme.of(context).colorScheme.primary),
         const SizedBox(width: 10),
-        Expanded(
-          child: Text(label),
-        ),
+        Expanded(child: Text(label)),
       ],
     );
   }
@@ -1080,12 +918,9 @@ String? _formatDate(DateTime? value) {
     return null;
   }
 
-  final year =
-      value.year.toString().padLeft(4, '0');
-  final month =
-      value.month.toString().padLeft(2, '0');
-  final day =
-      value.day.toString().padLeft(2, '0');
+  final year = value.year.toString().padLeft(4, '0');
+  final month = value.month.toString().padLeft(2, '0');
+  final day = value.day.toString().padLeft(2, '0');
 
   return '$year/$month/$day';
 }
@@ -1109,20 +944,15 @@ String _formatYen(int value) {
   final digits = value.abs().toString();
   final buffer = StringBuffer();
 
-  for (var index = 0;
-      index < digits.length;
-      index++) {
-    if (index > 0 &&
-        (digits.length - index) % 3 == 0) {
+  for (var index = 0; index < digits.length; index++) {
+    if (index > 0 && (digits.length - index) % 3 == 0) {
       buffer.write(',');
     }
 
     buffer.write(digits[index]);
   }
 
-  final amount = value < 0
-      ? '-${buffer.toString()}'
-      : buffer.toString();
+  final amount = value < 0 ? '-${buffer.toString()}' : buffer.toString();
 
   return '¥$amount';
 }

@@ -1,4 +1,4 @@
-﻿node_modules/
+node_modules/
 booking-profile/
 output/
 *.txt
@@ -6,3 +6,4 @@ output/
 *.png
 .env
 dist/
+*.before_*
