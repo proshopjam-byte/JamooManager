@@ -43,6 +43,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
   final SettingsRepository _settingsRepository = const SettingsRepository();
 
   Future<ReservationData>? _reservationDataFuture;
+  DateTime _selectedDate = DateTime.now();
 
   AppSettings _settings = AppSettings.defaults;
   bool _isSyncing = false;
@@ -56,8 +57,10 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
     );
   }
 
-  Future<ReservationData> _loadTodayCheckIns() {
-    return const DatabaseReservationRepository().loadTodayCheckIns();
+  Future<ReservationData> _loadSelectedDateCheckIns() {
+    return const DatabaseReservationRepository().loadCheckInsForDate(
+      _selectedDate,
+    );
   }
 
   BookingSyncService _createBookingSyncService() {
@@ -83,7 +86,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
       setState(() {
         _settings = settings;
         _isLoadingSettings = false;
-        _reservationDataFuture = _loadTodayCheckIns();
+        _reservationDataFuture = _loadSelectedDateCheckIns();
       });
     } on SettingsRepositoryException catch (error) {
       if (!mounted) {
@@ -93,7 +96,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
       setState(() {
         _settings = AppSettings.defaults;
         _isLoadingSettings = false;
-        _reservationDataFuture = _loadTodayCheckIns();
+        _reservationDataFuture = _loadSelectedDateCheckIns();
       });
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -109,7 +112,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
       setState(() {
         _settings = AppSettings.defaults;
         _isLoadingSettings = false;
-        _reservationDataFuture = _loadTodayCheckIns();
+        _reservationDataFuture = _loadSelectedDateCheckIns();
       });
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -149,13 +152,47 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
     }
   }
 
+  bool get _isViewingToday {
+    final now = DateTime.now();
+
+    return _selectedDate.year == now.year &&
+        _selectedDate.month == now.month &&
+        _selectedDate.day == now.day;
+  }
+
+  void _changeSelectedDate(int dayOffset) {
+    if (_isLoadingSettings) {
+      return;
+    }
+
+    final nextDate = _selectedDate.add(Duration(days: dayOffset));
+
+    setState(() {
+      _selectedDate = DateTime(nextDate.year, nextDate.month, nextDate.day);
+      _reservationDataFuture = _loadSelectedDateCheckIns();
+    });
+  }
+
+  void _showToday() {
+    if (_isLoadingSettings) {
+      return;
+    }
+
+    final now = DateTime.now();
+
+    setState(() {
+      _selectedDate = DateTime(now.year, now.month, now.day);
+      _reservationDataFuture = _loadSelectedDateCheckIns();
+    });
+  }
+
   void _reload() {
     if (_isLoadingSettings) {
       return;
     }
 
     setState(() {
-      _reservationDataFuture = _loadTodayCheckIns();
+      _reservationDataFuture = _loadSelectedDateCheckIns();
     });
   }
 
@@ -174,7 +211,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
 
     setState(() {
       _settings = updatedSettings;
-      _reservationDataFuture = _loadTodayCheckIns();
+      _reservationDataFuture = _loadSelectedDateCheckIns();
     });
 
     ScaffoldMessenger.of(
@@ -206,7 +243,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
       }
 
       setState(() {
-        _reservationDataFuture = _loadTodayCheckIns();
+        _reservationDataFuture = _loadSelectedDateCheckIns();
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -274,8 +311,31 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('本日のチェックイン'),
+        title: Text(
+          _isViewingToday
+              ? '本日のチェックイン'
+              : '${_formatDate(_selectedDate)}のチェックイン',
+        ),
         actions: [
+          IconButton(
+            tooltip: '前日',
+            onPressed: _isLoadingSettings
+                ? null
+                : () => _changeSelectedDate(-1),
+            icon: const Icon(Icons.chevron_left),
+          ),
+          TextButton(
+            onPressed: _isLoadingSettings || _isViewingToday
+                ? null
+                : _showToday,
+            child: const Text('今日'),
+          ),
+          IconButton(
+            tooltip: '翌日',
+            onPressed: _isLoadingSettings ? null : () => _changeSelectedDate(1),
+            icon: const Icon(Icons.chevron_right),
+          ),
+          const SizedBox(width: 8),
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: FilledButton.icon(
@@ -326,6 +386,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
                 if (data == null || data.isEmpty) {
                   return _EmptyView(
                     settings: _settings,
+                    targetDate: data?.targetDate ?? _selectedDate,
                     generatedAt: data?.generatedAt,
                     onReload: _reload,
                     onSync: _syncFromBooking,
@@ -462,6 +523,7 @@ class _ErrorView extends StatelessWidget {
 class _EmptyView extends StatelessWidget {
   const _EmptyView({
     required this.settings,
+    required this.targetDate,
     required this.generatedAt,
     required this.onReload,
     required this.onSync,
@@ -469,6 +531,7 @@ class _EmptyView extends StatelessWidget {
   });
 
   final AppSettings settings;
+  final DateTime targetDate;
   final DateTime? generatedAt;
   final VoidCallback onReload;
   final VoidCallback onSync;
@@ -476,7 +539,12 @@ class _EmptyView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final todayText = _formatToday();
+    final targetDateText = _formatDate(targetDate) ?? _formatToday();
+    final now = DateTime.now();
+    final isToday =
+        targetDate.year == now.year &&
+        targetDate.month == now.month &&
+        targetDate.day == now.day;
     final generatedAtText = _formatDateTime(generatedAt);
 
     return Center(
@@ -503,17 +571,20 @@ class _EmptyView extends StatelessWidget {
                   ),
                   const SizedBox(height: 18),
                   Text(
-                    todayText,
+                    targetDateText,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    '本日のチェックインは0件です',
+                    isToday ? '本日のチェックインは0件です' : 'この日のチェックインは0件です',
                     style: Theme.of(context).textTheme.headlineSmall,
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 10),
-                  const Text('本日到着予定のお客様はいません。', textAlign: TextAlign.center),
+                  Text(
+                    isToday ? '本日到着予定のお客様はいません。' : 'この日に到着予定のお客様はいません。',
+                    textAlign: TextAlign.center,
+                  ),
                   if (generatedAtText != null) ...[
                     const SizedBox(height: 20),
                     Text(
@@ -575,7 +646,7 @@ class _TodayCheckInBody extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
         children: [
-          if (!data.isTodayCheckIns || !data.isForToday || data.isStale) ...[
+          if (!data.isTodayCheckIns || data.isStale) ...[
             _OldDataWarning(
               data: data,
               bookingSourceName: settings.bookingSourceName,
@@ -586,7 +657,10 @@ class _TodayCheckInBody extends StatelessWidget {
           ],
           _SummaryPanel(data: data, settings: settings),
           const SizedBox(height: 18),
-          Text('本日到着のお客様', style: Theme.of(context).textTheme.titleLarge),
+          Text(
+            data.isForToday ? '本日到着のお客様' : 'この日に到着のお客様',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
           const SizedBox(height: 10),
           for (final reservation in reservations) ...[
             _ReservationCard(reservation: reservation, settings: settings),
@@ -613,21 +687,12 @@ class _OldDataWarning extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final targetDateText = _formatDate(data.targetDate);
     final generatedAtText = _formatDateTime(data.generatedAt);
 
     final reasons = <String>[];
 
     if (!data.isTodayCheckIns) {
       reasons.add('表示データが「当日チェックイン専用」の形式ではありません。');
-    }
-
-    if (!data.isForToday) {
-      reasons.add(
-        targetDateText == null
-            ? '取得対象日を確認できません。'
-            : '取得対象日は $targetDateText です。',
-      );
     }
 
     if (data.isStale) {
@@ -656,7 +721,7 @@ class _OldDataWarning extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '表示中の予約データは本日分ではありません',
+                    '予約データの取得状況を確認してください',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       color: Theme.of(context).colorScheme.onErrorContainer,
                       fontWeight: FontWeight.w700,
@@ -715,7 +780,7 @@ class _SummaryPanel extends StatelessWidget {
                 Icon(Icons.login, color: Theme.of(context).colorScheme.primary),
                 const SizedBox(width: 8),
                 Text(
-                  _formatToday(),
+                  _formatDate(data.targetDate) ?? _formatToday(),
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
               ],
