@@ -16,7 +16,9 @@ class DatabaseReservationRepository {
 
     final rows = await db.query(
       'reservations',
-      where: 'check_in = ?',
+      where:
+          "check_in = ? AND "
+          "LOWER(status) NOT IN ('cancelled', 'canceled')",
       whereArgs: [targetText],
       orderBy: 'guest_name COLLATE NOCASE ASC',
     );

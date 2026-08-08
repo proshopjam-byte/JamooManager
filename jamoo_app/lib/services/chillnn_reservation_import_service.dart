@@ -92,7 +92,9 @@ class ChillnnReservationImportService {
             : ChillnnImportAction.updated;
       }
 
-      await _upsertCustomer(txn, email, now);
+      if (email.type != ChillnnEmailType.cancelled) {
+        await _upsertCustomer(txn, email, now);
+      }
 
       await txn.insert('import_history', {
         'source': 'CHILLNN',
