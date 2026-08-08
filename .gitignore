@@ -7,3 +7,4 @@ output/
 .env
 dist/
 *.before_*
+chillnn_mail_input/

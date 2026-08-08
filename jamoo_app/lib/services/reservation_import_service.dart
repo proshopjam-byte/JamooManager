@@ -20,10 +20,7 @@ class ReservationImportService {
 
     await db.transaction((txn) async {
       for (final reservation in data.reservations) {
-        final result = await _upsertReservation(
-          txn,
-          reservation,
-        );
+        final result = await _upsertReservation(txn, reservation);
 
         switch (result.action) {
           case ReservationImportAction.inserted:
@@ -38,37 +35,25 @@ class ReservationImportService {
         }
 
         if (result.reservationId != null) {
-          await txn.insert(
-            'import_history',
-            {
-              'source': reservation.source,
-              'external_message_id': null,
-              'import_type': 'reservation_json',
-              'result': result.action.name,
-              'reservation_id': result.reservationId,
-              'message':
-                  'Booking.com JSONから予約データを取り込みました。',
-              'imported_at': DateTime.now()
-                  .toUtc()
-                  .toIso8601String(),
-            },
-          );
+          await txn.insert('import_history', {
+            'source': reservation.source,
+            'external_message_id': null,
+            'import_type': 'reservation_json',
+            'result': result.action.name,
+            'reservation_id': result.reservationId,
+            'message': 'Booking.com JSONから予約データを取り込みました。',
+            'imported_at': DateTime.now().toUtc().toIso8601String(),
+          });
         }
       }
 
-      final now = DateTime.now()
-          .toUtc()
-          .toIso8601String();
+      final now = DateTime.now().toUtc().toIso8601String();
 
-      await txn.insert(
-        'app_metadata',
-        {
-          'key': 'last_reservation_json_import_at',
-          'value': now,
-          'updated_at': now,
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      await txn.insert('app_metadata', {
+        'key': 'last_reservation_import_at',
+        'value': now,
+        'updated_at': now,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     });
 
     return ReservationImportResult(
@@ -84,80 +69,50 @@ class ReservationImportService {
     Reservation reservation,
   ) async {
     final source = reservation.source.trim();
-    final externalReservationId =
-        _externalReservationId(reservation);
+    final externalReservationId = _externalReservationId(reservation);
 
-    if (source.isEmpty ||
-        externalReservationId == null) {
-      return const _UpsertResult(
-        action: ReservationImportAction.skipped,
-      );
+    if (source.isEmpty || externalReservationId == null) {
+      return const _UpsertResult(action: ReservationImportAction.skipped);
     }
 
-    final now = DateTime.now()
-        .toUtc()
-        .toIso8601String();
+    final now = DateTime.now().toUtc().toIso8601String();
 
     final values = <String, Object?>{
       'source': source,
-      'external_reservation_id':
-          externalReservationId,
-      'guest_name': _cleanText(
-        reservation.guestName,
-      ),
+      'external_reservation_id': externalReservationId,
+      'guest_name': _cleanText(reservation.guestName),
       'email': null,
       'phone': null,
-      'check_in': _formatDate(
-        reservation.checkIn,
-      ),
-      'check_out': _formatDate(
-        reservation.checkOut,
-      ),
+      'check_in': _formatDate(reservation.checkIn),
+      'check_out': _formatDate(reservation.checkOut),
       'adults': reservation.adults ?? 0,
       'children': reservation.children,
       'total_guests':
           reservation.totalGuests ??
-          ((reservation.adults ?? 0) +
-              reservation.children),
-      'room_name': _cleanText(
-        reservation.roomName,
-      ),
+          ((reservation.adults ?? 0) + reservation.children),
+      'room_name': _cleanText(reservation.roomName),
       'plan_name': null,
       'price_yen': reservation.priceYen,
-      'status': _cleanText(
-            reservation.status,
-          ) ??
-          'confirmed',
-      'arrival_time': _cleanText(
-        reservation.arrivalTime,
-      ),
+      'status': _cleanText(reservation.status) ?? 'confirmed',
+      'arrival_time': _cleanText(reservation.arrivalTime),
       'special_requests': null,
-      'raw_payload': jsonEncode(
-        reservation.toJson(),
-      ),
+      'raw_payload': jsonEncode(reservation.toJson()),
       'updated_at': now,
     };
 
     final existing = await txn.query(
       'reservations',
       columns: const ['id'],
-      where:
-          'source = ? AND external_reservation_id = ?',
-      whereArgs: [
-        source,
-        externalReservationId,
-      ],
+      where: 'source = ? AND external_reservation_id = ?',
+      whereArgs: [source, externalReservationId],
       limit: 1,
     );
 
     if (existing.isEmpty) {
-      final id = await txn.insert(
-        'reservations',
-        {
-          ...values,
-          'created_at': now,
-        },
-      );
+      final id = await txn.insert('reservations', {
+        ...values,
+        'created_at': now,
+      });
 
       return _UpsertResult(
         action: ReservationImportAction.inserted,
@@ -167,12 +122,7 @@ class ReservationImportService {
 
     final id = existing.first['id'] as int;
 
-    await txn.update(
-      'reservations',
-      values,
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    await txn.update('reservations', values, where: 'id = ?', whereArgs: [id]);
 
     return _UpsertResult(
       action: ReservationImportAction.updated,
@@ -180,12 +130,8 @@ class ReservationImportService {
     );
   }
 
-  String? _externalReservationId(
-    Reservation reservation,
-  ) {
-    final reservationNumber = _cleanText(
-      reservation.reservationNumber,
-    );
+  String? _externalReservationId(Reservation reservation) {
+    final reservationNumber = _cleanText(reservation.reservationNumber);
 
     if (reservationNumber != null) {
       return reservationNumber;
@@ -200,9 +146,7 @@ class ReservationImportService {
     return null;
   }
 
-  static String? _cleanText(
-    String? value,
-  ) {
+  static String? _cleanText(String? value) {
     final cleaned = value?.trim();
 
     if (cleaned == null || cleaned.isEmpty) {
@@ -212,22 +156,14 @@ class ReservationImportService {
     return cleaned;
   }
 
-  static String? _formatDate(
-    DateTime? value,
-  ) {
+  static String? _formatDate(DateTime? value) {
     if (value == null) {
       return null;
     }
 
-    final year = value.year
-        .toString()
-        .padLeft(4, '0');
-    final month = value.month
-        .toString()
-        .padLeft(2, '0');
-    final day = value.day
-        .toString()
-        .padLeft(2, '0');
+    final year = value.year.toString().padLeft(4, '0');
+    final month = value.month.toString().padLeft(2, '0');
+    final day = value.day.toString().padLeft(2, '0');
 
     return '$year-$month-$day';
   }
@@ -246,8 +182,7 @@ class ReservationImportResult {
   final int updated;
   final int skipped;
 
-  bool get hasChanges =>
-      inserted > 0 || updated > 0;
+  bool get hasChanges => inserted > 0 || updated > 0;
 
   String get summary {
     return '対象$total件 / '
@@ -257,17 +192,10 @@ class ReservationImportResult {
   }
 }
 
-enum ReservationImportAction {
-  inserted,
-  updated,
-  skipped,
-}
+enum ReservationImportAction { inserted, updated, skipped }
 
 class _UpsertResult {
-  const _UpsertResult({
-    required this.action,
-    this.reservationId,
-  });
+  const _UpsertResult({required this.action, this.reservationId});
 
   final ReservationImportAction action;
   final int? reservationId;

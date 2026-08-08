@@ -26,8 +26,12 @@ class DatabaseReservationRepository {
     final metadata = await db.query(
       'app_metadata',
       columns: const ['value'],
-      where: 'key = ?',
-      whereArgs: const ['last_reservation_json_import_at'],
+      where: 'key IN (?, ?)',
+      whereArgs: const [
+        'last_reservation_import_at',
+        'last_reservation_json_import_at',
+      ],
+      orderBy: 'updated_at DESC',
       limit: 1,
     );
 
