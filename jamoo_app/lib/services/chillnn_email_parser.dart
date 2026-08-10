@@ -76,7 +76,12 @@ class ChillnnEmailParser {
   const ChillnnEmailParser();
 
   ChillnnReservationEmail parse({String? subject, required String body}) {
-    final normalized = body.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    final normalized = body
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n')
+        .replaceAll('\b', '')
+        .replaceAll('宿泊者氏名（フリガナ）：', 'ゲスト氏名（フリガナ）：')
+        .replaceAll('宿泊者氏名：', 'ゲスト氏名：');
     final lines = normalized
         .split('\n')
         .map((line) => line.trim())
@@ -157,8 +162,8 @@ class ChillnnEmailParser {
 
     final datePattern = RegExp(r'^【(\d{4}/\d{2}/\d{2})】$');
     final roomPattern = RegExp(
-      r'^(.+?)\s*-\s*（大人:\s*(\d+)人\s*,'
-      r'\s*子供:\s*(\d+)人',
+      r'^(.+?)\s*-\s*（大人:\s*(\d+)\s*人?\s*,'
+      r'\s*子供:\s*(\d+)\s*人?',
     );
 
     for (var index = 0; index < lines.length; index++) {

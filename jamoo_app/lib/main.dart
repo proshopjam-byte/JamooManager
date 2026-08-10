@@ -8,6 +8,7 @@ import 'repositories/database_reservation_repository.dart';
 import 'repositories/reservation_repository.dart';
 import 'repositories/settings_repository.dart';
 import 'services/booking_sync_service.dart';
+import 'services/chillnn_sync_service.dart';
 import 'services/database_service.dart';
 import 'services/reservation_import_service.dart';
 
@@ -65,6 +66,10 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
 
   BookingSyncService _createBookingSyncService() {
     return BookingSyncService(projectRootPath: _settings.managerRootPath);
+  }
+
+  ChillnnSyncService _createChillnnSyncService() {
+    return ChillnnSyncService(projectRootPath: _settings.managerRootPath);
   }
 
   @override
@@ -282,6 +287,71 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
     }
   }
 
+  Future<void> _syncFromChillnn() async {
+    if (_isSyncing || _isLoadingSettings) {
+      return;
+    }
+
+    setState(() {
+      _isSyncing = true;
+    });
+
+    try {
+      final syncResult = await _createChillnnSyncService().run();
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _reservationDataFuture = _loadSelectedDateCheckIns();
+      });
+
+      if (syncResult.failed > 0) {
+        await _showErrorDialog(
+          title: '一部のCHILLNNメールを取り込めませんでした',
+          message:
+              '${syncResult.summary}\n\n'
+              '${syncResult.errorDetails ?? ''}',
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 8),
+            content: Text(
+              'CHILLNN予約を取得して保存しました。\n'
+              '${syncResult.summary}',
+            ),
+          ),
+        );
+      }
+    } on ChillnnSyncException catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      await _showErrorDialog(
+        title: 'CHILLNNから取得できませんでした',
+        message: error.message,
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+
+      await _showErrorDialog(
+        title: 'CHILLNN取得中にエラーが発生しました',
+        message: error.toString(),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSyncing = false;
+        });
+      }
+    }
+  }
+
   Future<void> _showErrorDialog({
     required String title,
     required String message,
@@ -336,6 +406,16 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
             icon: const Icon(Icons.chevron_right),
           ),
           const SizedBox(width: 8),
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: OutlinedButton.icon(
+              onPressed: _isSyncing || _isLoadingSettings
+                  ? null
+                  : _syncFromChillnn,
+              icon: const Icon(Icons.mail_outline),
+              label: const Text('CHILLNNから取得'),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: FilledButton.icon(
@@ -403,8 +483,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
                 );
               },
             ),
-          if (_isSyncing)
-            _SyncingBanner(bookingSourceName: _settings.bookingSourceName),
+          if (_isSyncing) const _SyncingBanner(),
         ],
       ),
     );
@@ -412,9 +491,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
 }
 
 class _SyncingBanner extends StatelessWidget {
-  const _SyncingBanner({required this.bookingSourceName});
-
-  final String bookingSourceName;
+  const _SyncingBanner();
 
   @override
   Widget build(BuildContext context) {
@@ -436,9 +513,9 @@ class _SyncingBanner extends StatelessWidget {
               const SizedBox(width: 14),
               Expanded(
                 child: Text(
-                  '別画面で$bookingSourceNameの操作を'
-                  '完了してください。'
-                  '取得後にデータベースへ保存し、画面を更新します。',
+                  '予約情報を取得しています。'
+                  '別画面が開いた場合は案内に従ってください。'
+                  '取得後にデータベースへ保存して画面を更新します。',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
               ),
@@ -682,6 +759,7 @@ class _OldDataWarning extends StatelessWidget {
 
   final ReservationData data;
   final String bookingSourceName;
+
   final VoidCallback onSync;
   final bool isSyncing;
 

@@ -8,3 +8,5 @@ output/
 dist/
 *.before_*
 chillnn_mail_input/
+chillnn_mail_bot/credentials.json
+chillnn_mail_bot/token.json

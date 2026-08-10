@@ -9,11 +9,32 @@ class ChillnnReservationImportService {
   const ChillnnReservationImportService();
 
   Future<ChillnnReservationImportResult> importEmail(
-    ChillnnReservationEmail email,
-  ) async {
+    ChillnnReservationEmail email, {
+    String? externalMessageId,
+  }) async {
     final db = await DatabaseService.instance.database;
 
     return db.transaction((txn) async {
+      final messageId = externalMessageId?.trim();
+
+      if (messageId != null && messageId.isNotEmpty) {
+        final imported = await txn.query(
+          'import_history',
+          columns: const ['reservation_id'],
+          where: 'source = ? AND external_message_id = ?',
+          whereArgs: ['CHILLNN', messageId],
+          limit: 1,
+        );
+
+        if (imported.isNotEmpty) {
+          return ChillnnReservationImportResult(
+            action: ChillnnImportAction.skipped,
+            reservationId: imported.first['reservation_id'] as int?,
+            reservationNumber: email.reservationNumber,
+          );
+        }
+      }
+
       final now = DateTime.now().toUtc().toIso8601String();
       final status = _statusFor(email.type);
       final guestCounts = _guestCounts(email);
@@ -98,7 +119,9 @@ class ChillnnReservationImportService {
 
       await txn.insert('import_history', {
         'source': 'CHILLNN',
-        'external_message_id': null,
+        'external_message_id': messageId == null || messageId.isEmpty
+            ? null
+            : messageId,
         'import_type': 'chillnn_email',
         'result': action.name,
         'reservation_id': reservationId,
@@ -260,6 +283,8 @@ class ChillnnReservationImportService {
         return 'CHILLNNメールから予約情報を更新しました。';
       case ChillnnImportAction.cancelled:
         return 'CHILLNNメールから予約をキャンセルに更新しました。';
+      case ChillnnImportAction.skipped:
+        return 'このCHILLNNメールはすでに取り込み済みです。';
     }
   }
 
@@ -296,7 +321,7 @@ class ChillnnReservationImportResult {
   });
 
   final ChillnnImportAction action;
-  final int reservationId;
+  final int? reservationId;
   final String reservationNumber;
 
   String get summary {
@@ -307,11 +332,13 @@ class ChillnnReservationImportResult {
         return 'CHILLNN予約を更新しました。';
       case ChillnnImportAction.cancelled:
         return 'CHILLNN予約をキャンセルに更新しました。';
+      case ChillnnImportAction.skipped:
+        return 'このCHILLNNメールはすでに取り込み済みです。';
     }
   }
 }
 
-enum ChillnnImportAction { inserted, updated, cancelled }
+enum ChillnnImportAction { inserted, updated, cancelled, skipped }
 
 class _CustomerMatch {
   const _CustomerMatch({required this.where, required this.whereArgs});
