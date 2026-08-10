@@ -142,7 +142,7 @@ $setupLines = @(
 'if not exist "%~dp0chillnn_mail_bot\credentials.json" (',
 '    echo.',
 '    echo 【注意】CHILLNN取得にはcredentials.jsonの配置が必要です。',
-'    echo はじめにお読みください.txtを確認してください。',
+'    echo Please copy credentials.json into the chillnn_mail_bot folder.',
 '    echo.',
 ')',
 '',

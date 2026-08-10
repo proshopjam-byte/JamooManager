@@ -16,8 +16,7 @@ class AppPaths {
   static const String bookingBotFolderName = 'booking_bot';
   static const String bookingScriptFileName = 'booking.js';
   static const String outputFolderName = 'output';
-  static const String reservationJsonFileName =
-      'reservations_latest.json';
+  static const String reservationJsonFileName = 'reservations_latest.json';
 
   static Future<AppPaths> resolve({
     String? projectRootPath,
@@ -26,35 +25,26 @@ class AppPaths {
   }) async {
     final explicitBookingScript =
         _cleanPath(bookingScriptPath) ??
-        _cleanPath(
-          Platform.environment['JAMOO_BOOKING_SCRIPT'],
-        );
+        _cleanPath(Platform.environment['JAMOO_BOOKING_SCRIPT']);
 
     final explicitReservationJson =
         _cleanPath(reservationJsonPath) ??
-        _cleanPath(
-          Platform.environment['JAMOO_RESERVATIONS_JSON'],
-        );
+        _cleanPath(Platform.environment['JAMOO_RESERVATIONS_JSON']);
 
     final explicitProjectRoot =
         _cleanPath(projectRootPath) ??
-        _cleanPath(
-          Platform.environment['JAMOO_MANAGER_ROOT'],
-        );
+        _cleanPath(Platform.environment['JAMOO_MANAGER_ROOT']);
 
     if (explicitProjectRoot != null) {
       return _fromProjectRoot(
         Directory(explicitProjectRoot),
-        explicitBookingScript:
-            explicitBookingScript,
-        explicitReservationJson:
-            explicitReservationJson,
+        explicitBookingScript: explicitBookingScript,
+        explicitReservationJson: explicitReservationJson,
       );
     }
 
     if (explicitBookingScript != null) {
-      final scriptFile =
-          File(explicitBookingScript).absolute;
+      final scriptFile = File(explicitBookingScript).absolute;
 
       if (!await scriptFile.exists()) {
         throw AppPathsException(
@@ -63,22 +53,17 @@ class AppPaths {
         );
       }
 
-      final bookingDirectory =
-          scriptFile.parent.absolute;
+      final bookingDirectory = scriptFile.parent.absolute;
 
-      final inferredRoot =
-          bookingDirectory.parent.absolute;
+      final inferredRoot = bookingDirectory.parent.absolute;
 
       final jsonFile = explicitReservationJson != null
           ? File(explicitReservationJson).absolute
           : File(
-              join(
-                bookingDirectory.path,
-                [
-                  outputFolderName,
-                  reservationJsonFileName,
-                ],
-              ),
+              join(bookingDirectory.path, [
+                outputFolderName,
+                reservationJsonFileName,
+              ]),
             );
 
       return AppPaths._(
@@ -90,28 +75,19 @@ class AppPaths {
     }
 
     final startingDirectories = <Directory>[
-      Directory.current,
       File(Platform.resolvedExecutable).parent,
+      Directory.current,
     ];
 
     final visited = <String>{};
     final searchedScripts = <String>[];
 
-    for (final startingDirectory
-        in startingDirectories) {
+    for (final startingDirectory in startingDirectories) {
       var current = startingDirectory.absolute;
 
-      while (visited.add(
-        _normalizeForComparison(current.path),
-      )) {
+      while (visited.add(_normalizeForComparison(current.path))) {
         final candidateScript = File(
-          join(
-            current.path,
-            [
-              bookingBotFolderName,
-              bookingScriptFileName,
-            ],
-          ),
+          join(current.path, [bookingBotFolderName, bookingScriptFileName]),
         );
 
         searchedScripts.add(candidateScript.path);
@@ -119,8 +95,7 @@ class AppPaths {
         if (await candidateScript.exists()) {
           return _fromProjectRoot(
             current,
-            explicitReservationJson:
-                explicitReservationJson,
+            explicitReservationJson: explicitReservationJson,
           );
         }
 
@@ -152,21 +127,12 @@ class AppPaths {
     final absoluteRoot = projectRoot.absolute;
 
     final bookingDirectory = Directory(
-      join(
-        absoluteRoot.path,
-        [bookingBotFolderName],
-      ),
+      join(absoluteRoot.path, [bookingBotFolderName]),
     );
 
-    final scriptFile =
-        explicitBookingScript != null
-            ? File(explicitBookingScript).absolute
-            : File(
-                join(
-                  bookingDirectory.path,
-                  [bookingScriptFileName],
-                ),
-              );
+    final scriptFile = explicitBookingScript != null
+        ? File(explicitBookingScript).absolute
+        : File(join(bookingDirectory.path, [bookingScriptFileName]));
 
     if (!await scriptFile.exists()) {
       throw AppPathsException(
@@ -176,32 +142,25 @@ class AppPaths {
       );
     }
 
-    final jsonFile =
-        explicitReservationJson != null
-            ? File(explicitReservationJson).absolute
-            : File(
-                join(
-                  bookingDirectory.path,
-                  [
-                    outputFolderName,
-                    reservationJsonFileName,
-                  ],
-                ),
-              );
+    final jsonFile = explicitReservationJson != null
+        ? File(explicitReservationJson).absolute
+        : File(
+            join(bookingDirectory.path, [
+              outputFolderName,
+              reservationJsonFileName,
+            ]),
+          );
 
     return AppPaths._(
       projectRoot: absoluteRoot,
-      bookingBotDirectory:
-          scriptFile.parent.absolute,
+      bookingBotDirectory: scriptFile.parent.absolute,
       bookingScript: scriptFile,
       reservationJson: jsonFile,
     );
   }
 
   Future<void> ensureOutputDirectory() async {
-    await reservationJson.parent.create(
-      recursive: true,
-    );
+    await reservationJson.parent.create(recursive: true);
   }
 
   Future<bool> bookingScriptExists() {
@@ -212,10 +171,7 @@ class AppPaths {
     return reservationJson.exists();
   }
 
-  static String join(
-    String basePath,
-    List<String> parts,
-  ) {
+  static String join(String basePath, List<String> parts) {
     final separator = Platform.pathSeparator;
 
     var result = basePath;
@@ -224,12 +180,7 @@ class AppPaths {
       final cleanedPart = part
           .replaceAll('/', separator)
           .replaceAll('\\', separator)
-          .replaceFirst(
-            RegExp(
-              '^${RegExp.escape(separator)}+',
-            ),
-            '',
-          );
+          .replaceFirst(RegExp('^${RegExp.escape(separator)}+'), '');
 
       if (result.endsWith(separator)) {
         result = '$result$cleanedPart';
@@ -241,9 +192,7 @@ class AppPaths {
     return result;
   }
 
-  static String? _cleanPath(
-    String? value,
-  ) {
+  static String? _cleanPath(String? value) {
     if (value == null) {
       return null;
     }
@@ -255,32 +204,20 @@ class AppPaths {
     }
 
     if (cleaned.length >= 2 &&
-        ((cleaned.startsWith('"') &&
-                cleaned.endsWith('"')) ||
-            (cleaned.startsWith("'") &&
-                cleaned.endsWith("'")))) {
-      return cleaned.substring(
-        1,
-        cleaned.length - 1,
-      );
+        ((cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+            (cleaned.startsWith("'") && cleaned.endsWith("'")))) {
+      return cleaned.substring(1, cleaned.length - 1);
     }
 
     return cleaned;
   }
 
-  static bool _samePath(
-    String first,
-    String second,
-  ) {
-    return _normalizeForComparison(first) ==
-        _normalizeForComparison(second);
+  static bool _samePath(String first, String second) {
+    return _normalizeForComparison(first) == _normalizeForComparison(second);
   }
 
-  static String _normalizeForComparison(
-    String value,
-  ) {
-    final absolute =
-        Directory(value).absolute.path;
+  static String _normalizeForComparison(String value) {
+    final absolute = Directory(value).absolute.path;
 
     if (Platform.isWindows) {
       return absolute.toLowerCase();

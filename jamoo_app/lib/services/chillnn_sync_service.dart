@@ -91,6 +91,8 @@ class ChillnnSyncService {
       await _saveParserVersion();
     }
 
+    await _saveLastSuccessfulSync();
+
     return ChillnnSyncResult(
       totalMessages: messages.length,
       inserted: inserted,
@@ -134,6 +136,17 @@ class ChillnnSyncService {
       'INSERT OR REPLACE INTO app_metadata '
       '(key, value, updated_at) VALUES (?, ?, ?)',
       ['chillnn_email_parser_version', _parserVersion, now],
+    );
+  }
+
+  Future<void> _saveLastSuccessfulSync() async {
+    final db = await DatabaseService.instance.database;
+    final now = DateTime.now().toUtc().toIso8601String();
+
+    await db.rawInsert(
+      'INSERT OR REPLACE INTO app_metadata '
+      '(key, value, updated_at) VALUES (?, ?, ?)',
+      ['last_reservation_import_at', now, now],
     );
   }
 
