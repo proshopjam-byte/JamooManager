@@ -1,8 +1,9 @@
-﻿$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Stop"
 
 $repoRoot = $PSScriptRoot
 $appRoot = Join-Path $repoRoot "jamoo_app"
 $bookingBotRoot = Join-Path $repoRoot "booking_bot"
+$chillnnBotRoot = Join-Path $repoRoot "chillnn_mail_bot"
 $releaseRoot = Join-Path $appRoot "build\windows\x64\runner\Release"
 $distRoot = Join-Path $repoRoot "dist"
 $packageRoot = Join-Path $distRoot "JamooManager"
@@ -24,18 +25,16 @@ if (-not (Test-Path -LiteralPath $bookingBotRoot)) {
     throw "booking_bot フォルダが見つかりません。 $bookingBotRoot"
 }
 
-if (-not (Test-Path -LiteralPath $exePath)) {
-    Write-Host "Windows完成版が見つからないため、ビルドします。"
-    Push-Location $appRoot
-    try {
-        & flutter build windows --release
-        if ($LASTEXITCODE -ne 0) {
-            throw "FlutterのWindowsビルドに失敗しました。"
-        }
+Write-Host "最新のWindows完成版をビルドします。"
+Push-Location $appRoot
+try {
+    & flutter build windows --release
+    if ($LASTEXITCODE -ne 0) {
+        throw "FlutterのWindowsビルドに失敗しました。"
     }
-    finally {
-        Pop-Location
-    }
+}
+finally {
+    Pop-Location
 }
 
 if (-not (Test-Path -LiteralPath $exePath)) {
@@ -82,6 +81,26 @@ foreach ($fileName in $bookingFiles) {
 
 $outputRoot = Join-Path $portableBotRoot "output"
 New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
+$portableChillnnBotRoot = Join-Path $packageRoot "chillnn_mail_bot"
+New-Item -ItemType Directory -Path $portableChillnnBotRoot -Force | Out-Null
+
+Write-Host "CHILLNN取得ファイルをコピーしています..."
+
+$chillnnFiles = @(
+"fetch_chillnn.py",
+"requirements.txt"
+)
+
+foreach ($fileName in $chillnnFiles) {
+$sourcePath = Join-Path $chillnnBotRoot $fileName
+if (-not (Test-Path -LiteralPath $sourcePath)) {
+throw "CHILLNN配布ファイルが見つかりません。 $sourcePath"
+}
+Copy-Item -LiteralPath $sourcePath -Destination $portableChillnnBotRoot -Force
+}
+
+$chillnnOutputRoot = Join-Path $portableChillnnBotRoot "output"
+New-Item -ItemType Directory -Path $chillnnOutputRoot -Force | Out-Null
 
 $setupLines = @(
     '@echo off',
@@ -102,7 +121,32 @@ $setupLines = @(
     '    exit /b 1',
     ')',
     '',
-    'cd /d "%~dp0booking_bot"',
+    'where py >nul 2>&1',
+'if errorlevel 1 (',
+'    echo Pythonが見つかりません。',
+'    echo 先にPythonをインストールしてください。',
+'    echo.',
+'    pause',
+'    exit /b 1',
+')',
+'',
+'echo CHILLNN用Pythonライブラリをインストールしています...',
+'py -m pip install --user -r "%~dp0chillnn_mail_bot\requirements.txt"',
+'if errorlevel 1 (',
+'    echo.',
+'    echo CHILLNN用Pythonライブラリのインストールに失敗しました。',
+'    pause',
+'    exit /b 1',
+')',
+'',
+'if not exist "%~dp0chillnn_mail_bot\credentials.json" (',
+'    echo.',
+'    echo 【注意】CHILLNN取得にはcredentials.jsonの配置が必要です。',
+'    echo はじめにお読みください.txtを確認してください。',
+'    echo.',
+')',
+'',
+'cd /d "%~dp0booking_bot"',
     'echo Playwrightをインストールしています...',
     'call npm.cmd install',
     'if errorlevel 1 (',
@@ -153,7 +197,7 @@ $readmeLines = @(
     '【初めて使うとき】',
     '',
     '1. このZIPを任意の場所へ展開します。',
-    '2. Node.jsが入っていない場合は、先にNode.jsをインストールします。',
+    '2. Node.jsとPythonが入っていない場合は、先にインストールします。',
     '3. 「初回セットアップ.cmd」をダブルクリックします。',
     '4. セットアップ完了後、「JamooManagerを起動.cmd」をダブルクリックします。',
     '5. アプリ右上の歯車から「環境を診断」を実行します。',
@@ -163,7 +207,17 @@ $readmeLines = @(
     'アプリの「Booking.comから取得」を押します。',
     '別画面でBooking.comへのログインや確認操作を完了してください。',
     '',
-    '【重要】',
+    '【CHILLNNから取得する】',
+'',
+'1. Google Cloudで作成したOAuthデスクトップ用のcredentials.jsonを用意します。',
+'2. credentials.jsonをchillnn_mail_botフォルダへコピーします。',
+'3. アプリの「CHILLNNから取得」を押します。',
+'4. 初回だけブラウザでGoogle認証を完了します。',
+'',
+'※ token.jsonは認証後に自動作成されます。',
+'※ credentials.jsonとtoken.jsonは配布ZIPには含まれません。',
+'',
+'【重要】',
     '',
     '・JamooManager.exeだけを単独で移動しないでください。',
     '・このフォルダ内のファイルとフォルダは、一式のまま使用してください。',

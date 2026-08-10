@@ -1,8 +1,8 @@
-﻿; JamooManager Windows Installer
+; JamooManager Windows Installer
 ; Per-user installation for writable Booking.com data
 
 #define MyAppName "JamooManager"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppPublisher "プロショップJAM"
 #define MyAppExeName "JamooManager.exe"
 
@@ -18,7 +18,7 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 
 OutputDir=..\dist\installer
-OutputBaseFilename=JamooManager_Setup_1.0.0
+OutputBaseFilename=JamooManager_Setup_1.1.0
 SetupIconFile=..\jamoo_app\windows\runner\resources\app_icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
@@ -34,7 +34,7 @@ CloseApplications=yes
 RestartApplications=no
 SetupLogging=yes
 
-VersionInfoVersion=1.0.0.0
+VersionInfoVersion=1.1.0.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription=JamooManager Windows Installer
 VersionInfoProductName={#MyAppName}
@@ -57,7 +57,7 @@ Name: "{autoprograms}\{#MyAppName}\初回セットアップ"; Filename: "{app}\�
 Name: "{autoprograms}\{#MyAppName}\はじめにお読みください"; Filename: "{app}\はじめにお読みください.txt"
 
 [Run]
-Filename: "{app}\初回セットアップ.cmd"; Description: "Node.js・Playwrightの初回セットアップを実行する"; WorkingDir: "{app}"; Flags: postinstall shellexec waituntilterminated skipifsilent
+Filename: "{app}\初回セットアップ.cmd"; Description: "Booking.com・CHILLNNの初回セットアップを実行する"; WorkingDir: "{app}"; Flags: postinstall shellexec waituntilterminated skipifsilent
 Filename: "{app}\{#MyAppExeName}"; Description: "JamooManagerを起動する"; WorkingDir: "{app}"; Flags: postinstall nowait skipifsilent
 
 [UninstallDelete]
