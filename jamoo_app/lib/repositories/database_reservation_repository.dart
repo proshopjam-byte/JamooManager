@@ -5,6 +5,27 @@ import '../services/database_service.dart';
 class DatabaseReservationRepository {
   const DatabaseReservationRepository();
 
+  Future<List<Reservation>> loadReservationsOverlapping(
+    DateTime startDate,
+    DateTime endDate,
+  ) async {
+    final start = DateTime(startDate.year, startDate.month, startDate.day);
+    final end = DateTime(endDate.year, endDate.month, endDate.day);
+    final db = await DatabaseService.instance.database;
+
+    final rows = await db.query(
+      'reservations',
+      where:
+          "check_in IS NOT NULL AND check_out IS NOT NULL AND "
+          "check_in <= ? AND check_out > ? AND "
+          "LOWER(status) NOT IN ('cancelled', 'canceled')",
+      whereArgs: [_formatDate(end), _formatDate(start)],
+      orderBy: 'check_in ASC, guest_name COLLATE NOCASE ASC',
+    );
+
+    return rows.map(_reservationFromRow).toList(growable: false);
+  }
+
   Future<ReservationData> loadTodayCheckIns() {
     return loadCheckInsForDate(DateTime.now());
   }

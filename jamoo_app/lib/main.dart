@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'models/app_settings.dart';
 import 'models/reservation.dart';
 import 'models/reservation_data.dart';
+import 'pages/reservation_calendar_page.dart';
 import 'pages/settings_page.dart';
 import 'repositories/database_reservation_repository.dart';
 import 'repositories/reservation_repository.dart';
@@ -224,6 +225,16 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
     ).showSnackBar(const SnackBar(content: Text('設定を保存し、データ保存場所を反映しました。')));
   }
 
+  Future<void> _openReservationCalendar() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(builder: (context) => const ReservationCalendarPage()),
+    );
+
+    if (mounted) {
+      _reload();
+    }
+  }
+
   Future<void> _syncFromBooking() async {
     if (_isSyncing || _isLoadingSettings) {
       return;
@@ -255,7 +266,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
         SnackBar(
           content: Text(
             '${_settings.bookingSourceName}から'
-            '本日のチェックインを取得しました。\n'
+            '今後の予約を取得しました。\n'
             '${importResult.summary}',
           ),
         ),
@@ -406,6 +417,11 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
             icon: const Icon(Icons.chevron_right),
           ),
           const SizedBox(width: 8),
+          IconButton(
+            tooltip: '予約カレンダー',
+            onPressed: _isLoadingSettings ? null : _openReservationCalendar,
+            icon: const Icon(Icons.calendar_month_outlined),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: OutlinedButton.icon(

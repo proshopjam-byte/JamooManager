@@ -476,6 +476,277 @@ function parseTodayCheckIns(
   );
 }
 
+function parseUpcomingReservations(
+  bodyText,
+  targetDate = formatJstDate()
+) {
+  const allLines = splitLines(bodyText);
+  const candidates = removeDuplicates(
+    parseReservationsFromLines(allLines)
+  );
+
+  return candidates.filter(
+    (reservation) =>
+      reservation.checkIn !== null &&
+      reservation.checkIn >= targetDate &&
+      reservation.status !== 'cancelled'
+  );
+}
+
+function parseReservationListBody(bodyText, targetDate = formatJstDate()) {
+  const lines = splitLines(bodyText);
+  const reservations = [];
+  const englishDatePattern =
+    /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},\s*\d{4}\b/gi;
+
+  for (let index = 1; index < lines.length; index += 1) {
+    const detailLine = lines[index];
+    const dateMatches = [...detailLine.matchAll(englishDatePattern)];
+
+    if (dateMatches.length < 2) {
+      continue;
+    }
+
+    const checkIn = toIsoDate(dateMatches[0][0]);
+    const checkOut = toIsoDate(dateMatches[1][0]);
+
+    if (!checkIn || !checkOut) {
+      continue;
+    }
+
+    const firstDateIndex = dateMatches[0].index ?? 0;
+    const secondDateEnd =
+      (dateMatches[1].index ?? 0) + dateMatches[1][0].length;
+    const guestInfo = normalizeText(detailLine.slice(0, firstDateIndex));
+    const roomName = normalizeText(detailLine.slice(secondDateEnd));
+    const block = [lines[index - 1], detailLine];
+
+    for (
+      let lookAhead = index + 1;
+      lookAhead < lines.length && lookAhead <= index + 10;
+      lookAhead += 1
+    ) {
+      block.push(lines[lookAhead]);
+
+      if (/\b\d{8,12}\b/.test(lines[lookAhead])) {
+        break;
+      }
+    }
+
+    const joinedBlock = block.join(' ');
+    const numberMatch = joinedBlock.match(/\b(\d{8,12})\b/);
+
+    if (!numberMatch) {
+      continue;
+    }
+
+    const stayInfo = parseStayInfo([guestInfo]);
+    const moneyLine = block.find((line) =>
+      /(?:¥|￥|JPY|ﾂ･)\s*[\d,]+|\d{1,3}(?:,\d{3})+/.test(line)
+    );
+    const reservationNumber = numberMatch[1];
+    const status = isCancelledBlock(block)
+      ? 'cancelled'
+      : 'confirmed';
+
+    reservations.push({
+      id: `booking-${reservationNumber}`,
+      source: 'Booking.com',
+      reservationNumber,
+      guestName: normalizeText(lines[index - 1]) || null,
+      roomName: roomName || null,
+      checkIn,
+      checkOut,
+      nights: Math.max(
+        0,
+        Math.round(
+          (Date.parse(`${checkOut}T00:00:00Z`) -
+            Date.parse(`${checkIn}T00:00:00Z`)) /
+            86_400_000
+        )
+      ),
+      adults: stayInfo.adults,
+      children: stayInfo.children,
+      totalGuests:
+        stayInfo.adults === null
+          ? null
+          : stayInfo.adults + (stayInfo.children ?? 0),
+      priceYen: moneyLine ? toNumber(moneyLine) : null,
+      arrivalTime: null,
+      bookedOn: toIsoDate(block[2]),
+      status,
+      rawBlock: block,
+    });
+  }
+
+  return removeDuplicates(reservations).filter(
+    (reservation) =>
+      reservation.checkIn >= targetDate &&
+      reservation.status !== 'cancelled'
+  );
+}
+
+function parseReservationTableCells(cells) {
+  if (!Array.isArray(cells) || cells.length < 8) {
+    return null;
+  }
+
+  const normalized = cells.map(normalizeText);
+  const checkIn = toIsoDate(normalized[1]);
+  const checkOut = toIsoDate(normalized[2]);
+  const reservationNumber = normalized
+    .slice()
+    .reverse()
+    .find(isReservationNumber);
+
+  if (!checkIn || !checkOut || !reservationNumber) {
+    return null;
+  }
+
+  const guestLines = String(cells[0] ?? '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map(normalizeText)
+    .filter(Boolean);
+  const guestName = guestLines.find(
+    (line) =>
+      !/^Genius$/i.test(line) &&
+      !/\b\d+\s*(?:adult|adults|child|children)\b/i.test(line)
+  );
+  const stayInfo = parseStayInfo(guestLines);
+  const statusText = normalized[5] ?? '';
+
+  return {
+    id: `booking-${reservationNumber}`,
+    source: 'Booking.com',
+    reservationNumber,
+    guestName: guestName || null,
+    roomName: normalized[3] || null,
+    checkIn,
+    checkOut,
+    nights: Math.max(
+      0,
+      Math.round(
+        (Date.parse(`${checkOut}T00:00:00Z`) -
+          Date.parse(`${checkIn}T00:00:00Z`)) /
+          86_400_000
+      )
+    ),
+    adults: stayInfo.adults,
+    children: stayInfo.children,
+    totalGuests:
+      stayInfo.adults === null
+        ? null
+        : stayInfo.adults + (stayInfo.children ?? 0),
+    priceYen: toNumber(normalized[6]),
+    arrivalTime: null,
+    bookedOn: toIsoDate(normalized[4]),
+    status: /\b(cancelled|canceled)\b|キャンセル/i.test(statusText)
+      ? 'cancelled'
+      : 'confirmed',
+    rawBlock: normalized,
+  };
+}
+
+async function readReservationTable(container, targetDate) {
+  const rows = container.locator('tr, [role="row"]');
+  const reservations = [];
+
+  for (let index = 0; index < (await rows.count()); index += 1) {
+    const cells = await rows
+      .nth(index)
+      .locator('td, [role="cell"], [role="gridcell"]')
+      .allInnerTexts();
+    const reservation = parseReservationTableCells(cells);
+
+    if (
+      reservation &&
+      reservation.checkIn >= targetDate &&
+      reservation.status !== 'cancelled'
+    ) {
+      reservations.push(reservation);
+    }
+  }
+
+  return removeDuplicates(reservations);
+}
+
+async function selectReservationPage(context, targetDate) {
+  let best = null;
+
+  const pages = context.pages();
+
+  for (const [pageIndex, candidate] of pages.entries()) {
+    try {
+      await candidate.waitForLoadState('domcontentloaded', {
+        timeout: 10_000,
+      });
+      const tableReservations = [];
+
+      for (const frame of candidate.frames()) {
+        try {
+          tableReservations.push(
+            ...(await readReservationTable(frame, targetDate))
+          );
+        } catch (_) {
+          // Continue with other frames.
+        }
+      }
+
+      const bodyText = await candidate.locator('body').innerText();
+      const bodyReservations = parseUpcomingReservations(
+        bodyText,
+        targetDate
+      );
+      const listReservations = parseReservationListBody(
+        bodyText,
+        targetDate
+      );
+      const reservations = removeDuplicates([
+        ...tableReservations,
+        ...listReservations,
+        ...bodyReservations,
+      ]);
+      const url = candidate.url();
+      const title = await candidate.title();
+      let reservationUrlBonus = 0;
+
+      try {
+        reservationUrlBonus = /reservation|booking/i.test(
+          new URL(url).pathname
+        )
+          ? 10_000
+          : 0;
+      } catch (_) {
+        // Keep the URL bonus at zero for non-standard URLs.
+      }
+      const score =
+        reservationUrlBonus +
+        tableReservations.length * 100 +
+        reservations.length +
+        pageIndex;
+
+      console.log(
+        `確認タブ${pageIndex + 1}: 表${tableReservations.length}件 / ` +
+          `候補${reservations.length}件 / ${title} / ${url}`
+      );
+
+      if (!best || score > best.score) {
+        best = {
+          page: candidate,
+          bodyText,
+          reservations,
+          score,
+        };
+      }
+    } catch (_) {
+      // Ignore transient or already closed tabs.
+    }
+  }
+
+  return best;
+}
+
 function createPayload(
   reservations,
   targetDate
@@ -484,7 +755,7 @@ function createPayload(
     schemaVersion: 1,
     generatedAt: createGeneratedAt(),
     source: 'Booking.com',
-    scope: 'today_checkins',
+    scope: 'upcoming_reservations',
     targetDate,
     count: reservations.length,
     reservations,
@@ -502,25 +773,25 @@ function writeJsonAtomic(filePath, data) {
 async function waitForUser(rl, targetDate) {
   console.log('');
   console.log('【Booking.comでの操作】');
-  console.log('取得対象は当日チェックインのみです。');
-  console.log(`対象日：${targetDate}（日本時間）`);
+  console.log('取得対象は今日から1年先までの将来予約です。');
+  console.log(`開始日：${targetDate}（日本時間）`);
   console.log('');
   console.log('1. 必要ならログインしてください。');
   console.log('2. 「Reservations／予約」を開いてください。');
   console.log(
-    '3. チェックイン日を対象日にして、予約一覧を表示してください。'
+    '3. チェックイン日を今日から1年先までにして、予約一覧を表示してください。'
   );
   console.log(
-    '4. 一覧が複数ページなら、取得対象が画面に表示されるようにしてください。'
+    '4. 表示件数を最大にし、一覧の最後までスクロールしてください。'
   );
   console.log(
-    '5. 当日の到着が0件なら、ホーム画面の「Arrivals 0」のままでも構いません。'
+    '5. 一覧が複数ページの場合は、取得したい予約が表示されるページを開いてください。'
   );
   console.log('6. PowerShellへ戻って Enter を押してください。');
   console.log('');
 
   await rl.question(
-    '当日チェックイン一覧の準備ができたら Enter：'
+    '将来予約一覧の準備ができたら Enter：'
   );
 }
 
@@ -568,13 +839,28 @@ async function main() {
     await waitForUser(rl, targetDate);
     await page.waitForTimeout(1500);
 
-    const bodyText =
-      await page.locator('body').innerText();
-
-    const reservations = parseTodayCheckIns(
-      bodyText,
+    const selected = await selectReservationPage(
+      context,
       targetDate
     );
+
+    if (!selected) {
+      throw new Error('予約一覧を表示しているタブを確認できませんでした。');
+    }
+
+    const selectedPage = selected.page;
+    const bodyText = selected.bodyText;
+    const reservations = selected.reservations;
+
+    console.log(
+      `読取対象: ${await selectedPage.title()} / ${selectedPage.url()}`
+    );
+
+    if (reservations.length === 0) {
+      throw new Error(
+        '予約一覧から予約を解析できなかったため、既存データは更新しませんでした。'
+      );
+    }
 
     const payload = createPayload(
       reservations,
@@ -590,7 +876,7 @@ async function main() {
 
     const historyJsonPath = path.join(
       OUTPUT_DIR,
-      `today_checkins_${timestamp}.json`
+      `upcoming_reservations_${timestamp}.json`
     );
 
     const screenshotPath = path.join(
@@ -607,15 +893,15 @@ async function main() {
     writeJsonAtomic(historyJsonPath, payload);
     writeJsonAtomic(LATEST_JSON_PATH, payload);
 
-    await page.screenshot({
+    await selectedPage.screenshot({
       path: screenshotPath,
       fullPage: true,
     });
 
     console.log('');
-    console.log('当日チェックイン取得が完了しました。');
-    console.log(`対象日：${targetDate}`);
-    console.log(`当日チェックイン：${payload.count}件`);
+    console.log('将来予約の取得が完了しました。');
+    console.log(`開始日：${targetDate}`);
+    console.log(`将来予約：${payload.count}件`);
     console.log(
       `Flutter読込用：${LATEST_JSON_PATH}`
     );
@@ -658,7 +944,7 @@ async function main() {
   } catch (error) {
     console.error('');
     console.error(
-      '当日チェックイン取得中にエラーが発生しました。'
+      '将来予約の取得中にエラーが発生しました。'
     );
     console.error(error);
     process.exitCode = 1;
@@ -678,4 +964,7 @@ if (require.main === module) {
 module.exports = {
   formatJstDate,
   parseTodayCheckIns,
+  parseUpcomingReservations,
+  parseReservationListBody,
+  parseReservationTableCells,
 };
