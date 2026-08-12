@@ -1,9 +1,113 @@
+import 'dart:convert';
+
 import '../models/reservation.dart';
 import '../models/reservation_data.dart';
 import '../services/database_service.dart';
 
 class DatabaseReservationRepository {
   const DatabaseReservationRepository();
+
+  Future<void> saveMealOverride({
+    required String source,
+    required String reservationNumber,
+    required bool hasBreakfast,
+    required bool hasDinner,
+  }) async {
+    final db = await DatabaseService.instance.database;
+    final rows = await db.query(
+      'reservations',
+      columns: const ['id'],
+      where: 'source = ? AND external_reservation_id = ?',
+      whereArgs: [source, reservationNumber],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      throw StateError('食事設定の対象予約が見つかりません。');
+    }
+    final reservationId = rows.first['id'] as int;
+    await db.rawInsert(
+      'INSERT INTO reservation_meal_overrides '
+      '(reservation_id, has_breakfast, has_dinner, updated_at) '
+      'VALUES (?, ?, ?, ?) '
+      'ON CONFLICT(reservation_id) DO UPDATE SET '
+      'has_breakfast = excluded.has_breakfast, '
+      'has_dinner = excluded.has_dinner, '
+      'updated_at = excluded.updated_at',
+      [
+        reservationId,
+        hasBreakfast ? 1 : 0,
+        hasDinner ? 1 : 0,
+        DateTime.now().toUtc().toIso8601String(),
+      ],
+    );
+  }
+
+  Future<void> saveManualReservation({
+    String? reservationNumber,
+    required String guestName,
+    required DateTime checkIn,
+    required DateTime checkOut,
+    required String roomName,
+    required int adults,
+    required int children,
+    required int? priceYen,
+    required String? phone,
+    required String? notes,
+    required bool hasBreakfast,
+    required bool hasDinner,
+  }) async {
+    final db = await DatabaseService.instance.database;
+    final now = DateTime.now().toUtc().toIso8601String();
+    final id =
+        reservationNumber ?? 'manual-${DateTime.now().microsecondsSinceEpoch}';
+    final values = <String, Object?>{
+      'source': 'MANUAL',
+      'external_reservation_id': id,
+      'guest_name': guestName.trim(),
+      'phone': _emptyToNull(phone),
+      'check_in': _formatDate(checkIn),
+      'check_out': _formatDate(checkOut),
+      'adults': adults,
+      'children': children,
+      'total_guests': adults + children,
+      'room_name': roomName.trim(),
+      'price_yen': priceYen,
+      'status': 'confirmed',
+      'special_requests': _emptyToNull(notes),
+      'raw_payload': jsonEncode({
+        'manual': true,
+        'hasBreakfast': hasBreakfast,
+        'hasDinner': hasDinner,
+      }),
+      'created_at': now,
+      'updated_at': now,
+    };
+
+    if (reservationNumber == null) {
+      await db.insert('reservations', values);
+    } else {
+      values.remove('created_at');
+      await db.update(
+        'reservations',
+        values,
+        where: 'source = ? AND external_reservation_id = ?',
+        whereArgs: ['MANUAL', reservationNumber],
+      );
+    }
+  }
+
+  Future<void> cancelManualReservation(String reservationNumber) async {
+    final db = await DatabaseService.instance.database;
+    await db.update(
+      'reservations',
+      {
+        'status': 'cancelled',
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      },
+      where: 'source = ? AND external_reservation_id = ?',
+      whereArgs: ['MANUAL', reservationNumber],
+    );
+  }
 
   Future<List<Reservation>> loadReservationsOverlapping(
     DateTime startDate,
@@ -13,14 +117,17 @@ class DatabaseReservationRepository {
     final end = DateTime(endDate.year, endDate.month, endDate.day);
     final db = await DatabaseService.instance.database;
 
-    final rows = await db.query(
-      'reservations',
-      where:
-          "check_in IS NOT NULL AND check_out IS NOT NULL AND "
-          "check_in <= ? AND check_out > ? AND "
-          "LOWER(status) NOT IN ('cancelled', 'canceled')",
-      whereArgs: [_formatDate(end), _formatDate(start)],
-      orderBy: 'check_in ASC, guest_name COLLATE NOCASE ASC',
+    final rows = await db.rawQuery(
+      'SELECT r.*, '
+      'm.has_breakfast AS override_has_breakfast, '
+      'm.has_dinner AS override_has_dinner '
+      'FROM reservations r '
+      'LEFT JOIN reservation_meal_overrides m ON m.reservation_id = r.id '
+      'WHERE r.check_in IS NOT NULL AND r.check_out IS NOT NULL AND '
+      'r.check_in <= ? AND r.check_out > ? AND '
+      "LOWER(r.status) NOT IN ('cancelled', 'canceled') "
+      'ORDER BY r.check_in ASC, r.guest_name COLLATE NOCASE ASC',
+      [_formatDate(end), _formatDate(start)],
     );
 
     return rows.map(_reservationFromRow).toList(growable: false);
@@ -85,6 +192,27 @@ class DatabaseReservationRepository {
       nights = checkOut.difference(checkIn).inDays;
     }
 
+    final rawData = _readJsonData(row['raw_payload']);
+    final manualData = rawData?['manual'] == true ? rawData : null;
+    final planName = _readText(row['plan_name']);
+    final inferredMeals = _inferMeals(planName);
+    final overrideBreakfast = _readBool(row['override_has_breakfast']);
+    final overrideDinner = _readBool(row['override_has_dinner']);
+    final guestCount =
+        _readInt(row['total_guests']) ??
+        ((_readInt(row['adults']) ?? 0) + (_readInt(row['children']) ?? 0));
+    final chillnnBreakfastCount = _chillnnBreakfastCount(
+      source: row['source']?.toString(),
+      rawData: rawData,
+      nights: nights,
+      maximumGuests: guestCount,
+      hasBreakfast: inferredMeals.breakfast,
+    );
+    final hasBreakfast =
+        overrideBreakfast ??
+        manualData?['hasBreakfast'] as bool? ??
+        inferredMeals.breakfast;
+
     return Reservation(
       id: row['external_reservation_id']?.toString() ?? row['id'].toString(),
       source: row['source']?.toString() ?? 'Booking.com',
@@ -101,6 +229,19 @@ class DatabaseReservationRepository {
       arrivalTime: _readText(row['arrival_time']),
       bookedOn: null,
       status: _readText(row['status']),
+      phone: _readText(row['phone']),
+      specialRequests: _readText(row['special_requests']),
+      hasBreakfast: hasBreakfast,
+      breakfastGuestCount: hasBreakfast == true
+          ? (overrideBreakfast != null || manualData != null
+                ? guestCount
+                : chillnnBreakfastCount ?? guestCount)
+          : 0,
+      hasDinner:
+          overrideDinner ??
+          manualData?['hasDinner'] as bool? ??
+          inferredMeals.dinner,
+      planName: planName,
     );
   }
 
@@ -142,5 +283,77 @@ class DatabaseReservationRepository {
     final day = value.day.toString().padLeft(2, '0');
 
     return '$year-$month-$day';
+  }
+
+  static bool? _readBool(Object? value) {
+    final number = _readInt(value);
+    return number == null ? null : number != 0;
+  }
+
+  static String? _emptyToNull(String? value) {
+    final text = value?.trim();
+    return text == null || text.isEmpty ? null : text;
+  }
+
+  static Map<String, Object?>? _readJsonData(Object? value) {
+    final text = _readText(value);
+    if (text == null) return null;
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+    } catch (_) {
+      // Imported reservation payloads use different formats.
+    }
+    return null;
+  }
+
+  static int? _chillnnBreakfastCount({
+    required String? source,
+    required Map<String, Object?>? rawData,
+    required int? nights,
+    required int maximumGuests,
+    required bool? hasBreakfast,
+  }) {
+    if (source?.toUpperCase() != 'CHILLNN' || hasBreakfast != true) {
+      return null;
+    }
+
+    final planPrice = _readInt(rawData?['planPriceYen']);
+    final stayNights = nights ?? 0;
+    if (planPrice == null || planPrice <= 0 || stayNights <= 0) {
+      return null;
+    }
+
+    const breakfastPricePerPerson = 2200;
+    final count = (planPrice / breakfastPricePerPerson / stayNights).round();
+    if (count <= 0) return null;
+    return count > maximumGuests ? maximumGuests : count;
+  }
+
+  static ({bool? breakfast, bool? dinner}) _inferMeals(String? planName) {
+    final text = planName?.trim().toLowerCase();
+    if (text == null || text.isEmpty) {
+      return (breakfast: null, dinner: null);
+    }
+    if (text.contains('素泊') || text.contains('standard rate')) {
+      return (breakfast: false, dinner: false);
+    }
+    final twoMeals =
+        text.contains('2食') ||
+        text.contains('二食') ||
+        text.contains('朝夕') ||
+        text.contains('朝・夕');
+    final hasBreakfastKeyword =
+        text.contains('朝食') || text.contains('onbreakfast');
+    final hasDinnerKeyword = text.contains('夕食') || text.contains('ディナー');
+    if (!twoMeals && !hasBreakfastKeyword && !hasDinnerKeyword) {
+      return (breakfast: null, dinner: null);
+    }
+    return (
+      breakfast: twoMeals || hasBreakfastKeyword,
+      dinner: twoMeals || hasDinnerKeyword,
+    );
   }
 }

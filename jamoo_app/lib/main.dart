@@ -1027,6 +1027,11 @@ class _ReservationCard extends StatelessWidget {
                 label: '予約番号 $reservationNumber',
               ),
             ],
+            const SizedBox(height: 8),
+            _InformationRow(
+              icon: Icons.restaurant_menu,
+              label: _mealLabel(reservation),
+            ),
           ],
         ),
       ),
@@ -1041,6 +1046,20 @@ class _ReservationCard extends StatelessWidget {
     }
 
     return trimmed.substring(0, 1).toUpperCase();
+  }
+
+  static String _mealLabel(Reservation reservation) {
+    final breakfast = reservation.hasBreakfast == null
+        ? '未設定'
+        : reservation.hasBreakfast == true
+        ? 'あり${reservation.breakfastGuestCount == null ? '' : '（${reservation.breakfastGuestCount}人分）'}'
+        : 'なし';
+    final dinner = reservation.hasDinner == null
+        ? '未設定'
+        : reservation.hasDinner == true
+        ? 'あり'
+        : 'なし';
+    return '食事　朝食：$breakfast　夕食：$dinner';
   }
 }
 

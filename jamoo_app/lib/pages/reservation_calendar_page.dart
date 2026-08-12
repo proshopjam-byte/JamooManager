@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/reservation.dart';
 import '../repositories/database_reservation_repository.dart';
+import 'manual_reservation_dialog.dart';
 
 class ReservationCalendarPage extends StatefulWidget {
   const ReservationCalendarPage({super.key});
@@ -56,12 +57,97 @@ class _ReservationCalendarPageState extends State<ReservationCalendarPage> {
     });
   }
 
+  Future<void> _saveManualReservation([Reservation? reservation]) async {
+    final data = await showManualReservationDialog(
+      context,
+      initialDate: reservation?.checkIn ?? _selectedDate,
+      reservation: reservation,
+    );
+    if (data == null) return;
+
+    await _repository.saveManualReservation(
+      reservationNumber: reservation?.reservationNumber,
+      guestName: data.guestName,
+      checkIn: data.checkIn,
+      checkOut: data.checkOut,
+      roomName: data.roomName,
+      adults: data.adults,
+      children: data.children,
+      priceYen: data.priceYen,
+      phone: data.phone,
+      notes: data.notes,
+      hasBreakfast: data.hasBreakfast,
+      hasDinner: data.hasDinner,
+    );
+    if (!mounted) return;
+    _reload();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(reservation == null ? '直接予約を追加しました。' : '直接予約を更新しました。'),
+      ),
+    );
+  }
+
+  Future<void> _cancelManualReservation(Reservation reservation) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('直接予約をキャンセル'),
+        content: Text('${reservation.displayGuestName}様の予約をキャンセルしますか？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('戻る'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('キャンセルする'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || reservation.reservationNumber == null) return;
+    await _repository.cancelManualReservation(reservation.reservationNumber!);
+    if (!mounted) return;
+    _reload();
+  }
+
+  Future<void> _editMealSettings(Reservation reservation) async {
+    final number = reservation.reservationNumber;
+    if (number == null) return;
+    final data = await showMealSettingsDialog(
+      context,
+      reservation: reservation,
+    );
+    if (data == null) return;
+    await _repository.saveMealOverride(
+      source: reservation.source,
+      reservationNumber: number,
+      hasBreakfast: data.hasBreakfast,
+      hasDinner: data.hasDinner,
+    );
+    if (!mounted) return;
+    _reload();
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('食事設定を保存しました。')));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('予約カレンダー'),
         actions: [
+          FilledButton.icon(
+            onPressed: _saveManualReservation,
+            style: FilledButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+            ),
+            icon: const Icon(Icons.add, size: 20),
+            label: const Text('予約追加'),
+          ),
           IconButton(
             tooltip: '前月',
             onPressed: () => _changeMonth(-1),
@@ -116,6 +202,9 @@ class _ReservationCalendarPageState extends State<ReservationCalendarPage> {
                 _selectedDate = date;
               });
             },
+            onEditManual: _saveManualReservation,
+            onCancelManual: _cancelManualReservation,
+            onEditMeals: _editMealSettings,
           );
         },
       ),
@@ -129,12 +218,18 @@ class _CalendarBody extends StatelessWidget {
     required this.selectedDate,
     required this.reservations,
     required this.onDateSelected,
+    required this.onEditManual,
+    required this.onCancelManual,
+    required this.onEditMeals,
   });
 
   final DateTime visibleMonth;
   final DateTime selectedDate;
   final List<Reservation> reservations;
   final ValueChanged<DateTime> onDateSelected;
+  final ValueChanged<Reservation> onEditManual;
+  final ValueChanged<Reservation> onCancelManual;
+  final ValueChanged<Reservation> onEditMeals;
 
   @override
   Widget build(BuildContext context) {
@@ -156,6 +251,10 @@ class _CalendarBody extends StatelessWidget {
         final details = _SelectedDateReservations(
           selectedDate: selectedDate,
           reservations: selectedReservations,
+          allReservations: reservations,
+          onEditManual: onEditManual,
+          onCancelManual: onCancelManual,
+          onEditMeals: onEditMeals,
         );
 
         return SingleChildScrollView(
@@ -214,6 +313,8 @@ class _MonthCalendar extends StatelessWidget {
                   color: Color(0xFF1565C0),
                   label: 'Booking.com',
                 ),
+                const SizedBox(width: 14),
+                const _LegendDot(color: Color(0xFFEF6C00), label: '直接予約'),
               ],
             ),
             const SizedBox(height: 14),
@@ -234,7 +335,7 @@ class _MonthCalendar extends StatelessWidget {
               physics: const NeverScrollableScrollPhysics(),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 7,
-                childAspectRatio: 1.15,
+                childAspectRatio: 1.05,
                 crossAxisSpacing: 4,
                 mainAxisSpacing: 4,
               ),
@@ -281,7 +382,10 @@ class _CalendarDay extends StatelessWidget {
     final chillnnCount = reservations
         .where((reservation) => reservation.source.toUpperCase() == 'CHILLNN')
         .length;
-    final bookingCount = reservations.length - chillnnCount;
+    final manualCount = reservations
+        .where((reservation) => reservation.source.toUpperCase() == 'MANUAL')
+        .length;
+    final bookingCount = reservations.length - chillnnCount - manualCount;
 
     return InkWell(
       borderRadius: BorderRadius.circular(10),
@@ -324,6 +428,14 @@ class _CalendarDay extends StatelessWidget {
                   count: bookingCount,
                 ),
               ),
+            if (manualCount > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: _CountBadge(
+                  color: const Color(0xFFEF6C00),
+                  count: manualCount,
+                ),
+              ),
           ],
         ),
       ),
@@ -364,10 +476,18 @@ class _SelectedDateReservations extends StatelessWidget {
   const _SelectedDateReservations({
     required this.selectedDate,
     required this.reservations,
+    required this.allReservations,
+    required this.onEditManual,
+    required this.onCancelManual,
+    required this.onEditMeals,
   });
 
   final DateTime selectedDate;
   final List<Reservation> reservations;
+  final List<Reservation> allReservations;
+  final ValueChanged<Reservation> onEditManual;
+  final ValueChanged<Reservation> onCancelManual;
+  final ValueChanged<Reservation> onEditMeals;
 
   @override
   Widget build(BuildContext context) {
@@ -377,6 +497,29 @@ class _SelectedDateReservations extends StatelessWidget {
           (reservation.adults ?? 0) + reservation.children;
       return sum + count;
     });
+    final breakfastGuests = allReservations
+        .where(
+          (reservation) =>
+              reservation.hasBreakfast == true &&
+              _staysOn(reservation, selectedDate),
+        )
+        .fold<int>(
+          0,
+          (sum, reservation) =>
+              sum +
+              (reservation.breakfastGuestCount ?? _guestCount(reservation)),
+        );
+    final dinnerGuests = allReservations
+        .where(
+          (reservation) =>
+              reservation.hasDinner == true &&
+              _staysOn(reservation, selectedDate),
+        )
+        .fold<int>(0, (sum, reservation) => sum + _guestCount(reservation));
+    final unsetMeals = allReservations.where((reservation) {
+      return _staysOn(reservation, selectedDate) &&
+          (reservation.hasBreakfast == null || reservation.hasDinner == null);
+    }).length;
 
     return Card(
       child: Padding(
@@ -390,6 +533,35 @@ class _SelectedDateReservations extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text('${reservations.length}室・$totalGuests名'),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.secondaryContainer,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'この日の食事準備',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 6),
+                  Text('☕ 翌朝の朝食　$breakfastGuests人分'),
+                  Text('🍽 夕食　$dinnerGuests人分'),
+                  if (unsetMeals > 0)
+                    Text(
+                      '⚠ 食事未設定　$unsetMeals件',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                ],
+              ),
+            ),
             const Divider(height: 28),
             if (reservations.isEmpty)
               const Padding(
@@ -398,7 +570,12 @@ class _SelectedDateReservations extends StatelessWidget {
               )
             else
               ...reservations.map(
-                (reservation) => _ReservationTile(reservation: reservation),
+                (reservation) => _ReservationTile(
+                  reservation: reservation,
+                  onEditManual: onEditManual,
+                  onCancelManual: onCancelManual,
+                  onEditMeals: onEditMeals,
+                ),
               ),
           ],
         ),
@@ -408,14 +585,25 @@ class _SelectedDateReservations extends StatelessWidget {
 }
 
 class _ReservationTile extends StatelessWidget {
-  const _ReservationTile({required this.reservation});
+  const _ReservationTile({
+    required this.reservation,
+    required this.onEditManual,
+    required this.onCancelManual,
+    required this.onEditMeals,
+  });
 
   final Reservation reservation;
+  final ValueChanged<Reservation> onEditManual;
+  final ValueChanged<Reservation> onCancelManual;
+  final ValueChanged<Reservation> onEditMeals;
 
   @override
   Widget build(BuildContext context) {
     final isChillnn = reservation.source.toUpperCase() == 'CHILLNN';
-    final sourceColor = isChillnn
+    final isManual = reservation.source.toUpperCase() == 'MANUAL';
+    final sourceColor = isManual
+        ? const Color(0xFFEF6C00)
+        : isChillnn
         ? const Color(0xFF386641)
         : const Color(0xFF1565C0);
 
@@ -439,7 +627,7 @@ class _ReservationTile extends StatelessWidget {
                 ),
               ),
               Text(
-                reservation.source,
+                isManual ? '直接予約' : reservation.source,
                 style: TextStyle(
                   color: sourceColor,
                   fontWeight: FontWeight.bold,
@@ -453,6 +641,40 @@ class _ReservationTile extends StatelessWidget {
           Text('${reservation.displayGuestCount}・${reservation.displayPrice}'),
           if (reservation.reservationNumber != null)
             Text('予約番号 ${reservation.reservationNumber}'),
+          if (reservation.phone != null) Text('電話 ${reservation.phone}'),
+          if (reservation.specialRequests != null)
+            Text('メモ ${reservation.specialRequests}'),
+          if (reservation.hasBreakfast != null || reservation.hasDinner != null)
+            Text(
+              '食事　朝食：${reservation.hasBreakfast == true ? 'あり${reservation.breakfastGuestCount == null ? '' : '（${reservation.breakfastGuestCount}人分）'}' : 'なし'}　'
+              '夕食：${reservation.hasDinner == true ? 'あり' : 'なし'}',
+            ),
+          if (reservation.hasBreakfast == null && reservation.hasDinner == null)
+            const Text('食事　未設定'),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: () => onEditMeals(reservation),
+            icon: const Icon(Icons.restaurant_menu),
+            label: const Text('食事を訂正'),
+          ),
+          if (isManual) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () => onEditManual(reservation),
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('編集'),
+                ),
+                TextButton.icon(
+                  onPressed: () => onCancelManual(reservation),
+                  icon: const Icon(Icons.cancel_outlined),
+                  label: const Text('キャンセル'),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -522,6 +744,11 @@ bool _staysOn(Reservation reservation, DateTime date) {
   final start = DateTime(checkIn.year, checkIn.month, checkIn.day);
   final end = DateTime(checkOut.year, checkOut.month, checkOut.day);
   return !target.isBefore(start) && target.isBefore(end);
+}
+
+int _guestCount(Reservation reservation) {
+  return reservation.totalGuests ??
+      (reservation.adults ?? 0) + reservation.children;
 }
 
 bool _sameDay(DateTime first, DateTime second) {

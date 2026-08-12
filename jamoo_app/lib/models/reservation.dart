@@ -15,6 +15,12 @@ class Reservation {
     required this.arrivalTime,
     required this.bookedOn,
     required this.status,
+    this.phone,
+    this.specialRequests,
+    this.hasBreakfast,
+    this.breakfastGuestCount,
+    this.hasDinner,
+    this.planName,
   });
 
   final String id;
@@ -32,6 +38,12 @@ class Reservation {
   final String? arrivalTime;
   final DateTime? bookedOn;
   final String? status;
+  final String? phone;
+  final String? specialRequests;
+  final bool? hasBreakfast;
+  final int? breakfastGuestCount;
+  final bool? hasDinner;
+  final String? planName;
 
   factory Reservation.fromJson(Map<String, dynamic> json) {
     return Reservation(
@@ -50,6 +62,12 @@ class Reservation {
       arrivalTime: _readNullableString(json['arrivalTime']),
       bookedOn: _readNullableDate(json['bookedOn']),
       status: _readNullableString(json['status']),
+      phone: _readNullableString(json['phone']),
+      specialRequests: _readNullableString(json['specialRequests']),
+      hasBreakfast: _readNullableBool(json['hasBreakfast']),
+      breakfastGuestCount: _readNullableInt(json['breakfastGuestCount']),
+      hasDinner: _readNullableBool(json['hasDinner']),
+      planName: _readNullableString(json['planName']),
     );
   }
 
@@ -70,6 +88,12 @@ class Reservation {
       'arrivalTime': arrivalTime,
       'bookedOn': _dateToJson(bookedOn),
       'status': status,
+      'phone': phone,
+      'specialRequests': specialRequests,
+      'hasBreakfast': hasBreakfast,
+      'breakfastGuestCount': breakfastGuestCount,
+      'hasDinner': hasDinner,
+      'planName': planName,
     };
   }
 
@@ -130,6 +154,12 @@ class Reservation {
     String? arrivalTime,
     DateTime? bookedOn,
     String? status,
+    String? phone,
+    String? specialRequests,
+    bool? hasBreakfast,
+    int? breakfastGuestCount,
+    bool? hasDinner,
+    String? planName,
   }) {
     return Reservation(
       id: id ?? this.id,
@@ -147,13 +177,16 @@ class Reservation {
       arrivalTime: arrivalTime ?? this.arrivalTime,
       bookedOn: bookedOn ?? this.bookedOn,
       status: status ?? this.status,
+      phone: phone ?? this.phone,
+      specialRequests: specialRequests ?? this.specialRequests,
+      hasBreakfast: hasBreakfast ?? this.hasBreakfast,
+      breakfastGuestCount: breakfastGuestCount ?? this.breakfastGuestCount,
+      hasDinner: hasDinner ?? this.hasDinner,
+      planName: planName ?? this.planName,
     );
   }
 
-  static String _readRequiredString(
-    Map<String, dynamic> json,
-    String key,
-  ) {
+  static String _readRequiredString(Map<String, dynamic> json, String key) {
     final value = _readNullableString(json[key]);
 
     if (value == null) {
@@ -186,6 +219,13 @@ class Reservation {
     }
 
     return int.tryParse(value.toString());
+  }
+
+  static bool? _readNullableBool(dynamic value) {
+    if (value is bool) return value;
+    if (value == 1 || value == '1' || value == 'true') return true;
+    if (value == 0 || value == '0' || value == 'false') return false;
+    return null;
   }
 
   static DateTime? _readNullableDate(dynamic value) {

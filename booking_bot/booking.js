@@ -747,6 +747,114 @@ async function selectReservationPage(context, targetDate) {
   return best;
 }
 
+function mealPlanFromDetail(bodyText) {
+  const text = normalizeText(bodyText);
+  if (/\bonbreakfast\b/i.test(text)) {
+    return {
+      planName: 'onbreakfast',
+      hasBreakfast: true,
+      hasDinner: false,
+    };
+  }
+  if (/\bstandard\s+rate\b/i.test(text)) {
+    return {
+      planName: 'Standard Rate',
+      hasBreakfast: false,
+      hasDinner: false,
+    };
+  }
+  return {
+    planName: null,
+    hasBreakfast: null,
+    hasDinner: null,
+  };
+}
+
+function mealPlanFromPrice(reservation) {
+  const guests =
+    reservation.totalGuests ??
+    ((reservation.adults ?? 0) + (reservation.children ?? 0));
+  const price = reservation.priceYen;
+  const nights = reservation.nights ?? 1;
+
+  if (!price || !guests || guests < 1 || nights < 1) {
+    return {
+      planName: null,
+      hasBreakfast: null,
+      hasDinner: false,
+    };
+  }
+
+  const pricePerGuestPerNight = Math.round(price / guests / nights);
+  const hasBreakfast =
+    guests === 1
+      ? pricePerGuestPerNight > 10_800
+      : pricePerGuestPerNight >= 9_000;
+
+  return {
+    planName: hasBreakfast
+      ? `料金判定・朝食付き（1人1泊あたり¥${pricePerGuestPerNight.toLocaleString('ja-JP')}）`
+      : `料金判定・素泊まり（1人1泊あたり¥${pricePerGuestPerNight.toLocaleString('ja-JP')}）`,
+    hasBreakfast,
+    hasDinner: false,
+  };
+}
+
+async function enrichMealPlans(context, reservationPage, reservations) {
+  const enriched = [];
+
+  console.log('Booking.comの食事プランを確認しています...');
+
+  for (const reservation of reservations) {
+    const number = reservation.reservationNumber;
+    let meal = {
+      planName: null,
+      hasBreakfast: null,
+      hasDinner: null,
+    };
+
+    if (number) {
+      try {
+        const link = reservationPage
+          .locator('a')
+          .filter({ hasText: number })
+          .first();
+        const href = await link.getAttribute('href');
+
+        if (href) {
+          const detailPage = await context.newPage();
+          try {
+            await detailPage.goto(new URL(href, reservationPage.url()).href, {
+              waitUntil: 'domcontentloaded',
+              timeout: 60_000,
+            });
+            await detailPage.waitForTimeout(800);
+            meal = mealPlanFromDetail(
+              await detailPage.locator('body').innerText()
+            );
+          } finally {
+            await detailPage.close();
+          }
+        }
+      } catch (_) {
+        // Keep the meal plan unset when a detail page cannot be read.
+      }
+    }
+
+    if (meal.planName === null) {
+      meal = mealPlanFromPrice(reservation);
+    }
+
+    console.log(
+      `${reservation.guestName ?? number ?? '予約'}: ` +
+        `${meal.planName ?? '食事プラン未設定'}`
+    );
+    enriched.push({ ...reservation, ...meal });
+  }
+
+  return enriched;
+}
+
 function createPayload(
   reservations,
   targetDate
@@ -850,7 +958,11 @@ async function main() {
 
     const selectedPage = selected.page;
     const bodyText = selected.bodyText;
-    const reservations = selected.reservations;
+    const reservations = await enrichMealPlans(
+      context,
+      selectedPage,
+      selected.reservations
+    );
 
     console.log(
       `読取対象: ${await selectedPage.title()} / ${selectedPage.url()}`
@@ -967,4 +1079,6 @@ module.exports = {
   parseUpcomingReservations,
   parseReservationListBody,
   parseReservationTableCells,
+  mealPlanFromDetail,
+  mealPlanFromPrice,
 };

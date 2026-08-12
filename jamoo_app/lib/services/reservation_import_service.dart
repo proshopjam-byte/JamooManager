@@ -91,7 +91,7 @@ class ReservationImportService {
           reservation.totalGuests ??
           ((reservation.adults ?? 0) + reservation.children),
       'room_name': _cleanText(reservation.roomName),
-      'plan_name': null,
+      'plan_name': _cleanText(reservation.planName),
       'price_yen': reservation.priceYen,
       'status': _cleanText(reservation.status) ?? 'confirmed',
       'arrival_time': _cleanText(reservation.arrivalTime),

@@ -10,7 +10,7 @@ class DatabaseService {
   static final DatabaseService instance = DatabaseService._();
 
   static const String databaseFileName = 'jamoo_manager.db';
-  static const int databaseVersion = 1;
+  static const int databaseVersion = 2;
 
   Database? _database;
 
@@ -34,23 +34,15 @@ class DatabaseService {
 
     sqfliteFfiInit();
 
-    final supportDirectory =
-        await getApplicationSupportDirectory();
+    final supportDirectory = await getApplicationSupportDirectory();
 
     final dataDirectory = Directory(
-      p.join(
-        supportDirectory.path,
-        'JamooManager',
-        'data',
-      ),
+      p.join(supportDirectory.path, 'JamooManager', 'data'),
     );
 
     await dataDirectory.create(recursive: true);
 
-    final databasePath = p.join(
-      dataDirectory.path,
-      databaseFileName,
-    );
+    final databasePath = p.join(dataDirectory.path, databaseFileName);
 
     final factory = databaseFactoryFfi;
 
@@ -69,10 +61,7 @@ class DatabaseService {
     await db.execute('PRAGMA foreign_keys = ON');
   }
 
-  Future<void> _onCreate(
-    Database db,
-    int version,
-  ) async {
+  Future<void> _onCreate(Database db, int version) async {
     await db.transaction((txn) async {
       await txn.execute('''
         CREATE TABLE reservations (
@@ -212,16 +201,29 @@ class DatabaseService {
           updated_at TEXT NOT NULL
         )
       ''');
+
+      await _createMealOverridesTable(txn);
     });
   }
 
-  Future<void> _onUpgrade(
-    Database db,
-    int oldVersion,
-    int newVersion,
-  ) async {
-    // 今後のバージョンアップ時に、
-    // 既存データを残したままテーブルを更新します。
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await _createMealOverridesTable(db);
+    }
+  }
+
+  static Future<void> _createMealOverridesTable(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS reservation_meal_overrides (
+        reservation_id INTEGER PRIMARY KEY,
+        has_breakfast INTEGER NOT NULL,
+        has_dinner INTEGER NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(reservation_id)
+          REFERENCES reservations(id)
+          ON DELETE CASCADE
+      )
+    ''');
   }
 
   Future<String> databasePath() async {
