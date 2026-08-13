@@ -9,6 +9,7 @@ import 'repositories/database_reservation_repository.dart';
 import 'repositories/reservation_repository.dart';
 import 'repositories/settings_repository.dart';
 import 'services/booking_sync_service.dart';
+import 'services/checkin_card_print_service.dart';
 import 'services/chillnn_sync_service.dart';
 import 'services/database_service.dart';
 import 'services/reservation_import_service.dart';
@@ -1031,6 +1032,29 @@ class _ReservationCard extends StatelessWidget {
             _InformationRow(
               icon: Icons.restaurant_menu,
               label: _mealLabel(reservation),
+            ),
+            const SizedBox(height: 14),
+            Align(
+              alignment: Alignment.centerRight,
+              child: OutlinedButton.icon(
+                onPressed: () async {
+                  try {
+                    await const CheckinCardPrintService().previewCard(
+                      context,
+                      reservation,
+                    );
+                  } catch (error) {
+                    if (!context.mounted) {
+                      return;
+                    }
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('PDFの作成に失敗しました: $error')),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.print_outlined),
+                label: const Text('チェックインカード'),
+              ),
             ),
           ],
         ),

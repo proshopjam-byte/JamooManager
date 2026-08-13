@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/reservation.dart';
 import '../repositories/database_reservation_repository.dart';
+import '../services/checkin_card_print_service.dart';
 import 'manual_reservation_dialog.dart';
 
 class ReservationCalendarPage extends StatefulWidget {
@@ -75,6 +76,8 @@ class _ReservationCalendarPageState extends State<ReservationCalendarPage> {
       children: data.children,
       priceYen: data.priceYen,
       phone: data.phone,
+      address: data.address,
+      postalCode: data.postalCode,
       notes: data.notes,
       hasBreakfast: data.hasBreakfast,
       hasDinner: data.hasDinner,
@@ -335,7 +338,7 @@ class _MonthCalendar extends StatelessWidget {
               physics: const NeverScrollableScrollPhysics(),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 7,
-                childAspectRatio: 1.05,
+                childAspectRatio: 0.75,
                 crossAxisSpacing: 4,
                 mainAxisSpacing: 4,
               ),
@@ -386,6 +389,17 @@ class _CalendarDay extends StatelessWidget {
         .where((reservation) => reservation.source.toUpperCase() == 'MANUAL')
         .length;
     final bookingCount = reservations.length - chillnnCount - manualCount;
+    final breakfastGuests = reservations
+        .where((reservation) => reservation.hasBreakfast == true)
+        .fold<int>(
+          0,
+          (sum, reservation) =>
+              sum +
+              (reservation.breakfastGuestCount ?? _guestCount(reservation)),
+        );
+    final dinnerGuests = reservations
+        .where((reservation) => reservation.hasDinner == true)
+        .fold<int>(0, (sum, reservation) => sum + _guestCount(reservation));
 
     return InkWell(
       borderRadius: BorderRadius.circular(10),
@@ -436,6 +450,32 @@ class _CalendarDay extends StatelessWidget {
                   count: manualCount,
                 ),
               ),
+            if (breakfastGuests > 0 || dinnerGuests > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Row(
+                  children: [
+                    if (breakfastGuests > 0)
+                      Expanded(
+                        child: _MealCountBadge(
+                          color: const Color(0xFF795548),
+                          label: '朝食',
+                          count: breakfastGuests,
+                        ),
+                      ),
+                    if (breakfastGuests > 0 && dinnerGuests > 0)
+                      const SizedBox(width: 3),
+                    if (dinnerGuests > 0)
+                      Expanded(
+                        child: _MealCountBadge(
+                          color: const Color(0xFF7E57C2),
+                          label: '夕食',
+                          count: dinnerGuests,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
           ],
         ),
       ),
@@ -465,6 +505,40 @@ class _CountBadge extends StatelessWidget {
         style: const TextStyle(
           color: Colors.white,
           fontSize: 11,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+}
+
+class _MealCountBadge extends StatelessWidget {
+  const _MealCountBadge({
+    required this.color,
+    required this.label,
+    required this.count,
+  });
+
+  final Color color;
+  final String label;
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        '$label $count人',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 9,
           fontWeight: FontWeight.bold,
         ),
       ),
@@ -652,10 +726,35 @@ class _ReservationTile extends StatelessWidget {
           if (reservation.hasBreakfast == null && reservation.hasDinner == null)
             const Text('食事　未設定'),
           const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: () => onEditMeals(reservation),
-            icon: const Icon(Icons.restaurant_menu),
-            label: const Text('食事を訂正'),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                onPressed: () => onEditMeals(reservation),
+                icon: const Icon(Icons.restaurant_menu),
+                label: const Text('食事を訂正'),
+              ),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  try {
+                    await const CheckinCardPrintService().previewCard(
+                      context,
+                      reservation,
+                    );
+                  } catch (error) {
+                    if (!context.mounted) {
+                      return;
+                    }
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('PDFの作成に失敗しました: $error')),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.print_outlined),
+                label: const Text('チェックインカード'),
+              ),
+            ],
           ),
           if (isManual) ...[
             const SizedBox(height: 8),

@@ -12,6 +12,8 @@ class ManualReservationFormData {
     required this.children,
     required this.priceYen,
     required this.phone,
+    required this.address,
+    required this.postalCode,
     required this.notes,
     required this.hasBreakfast,
     required this.hasDinner,
@@ -25,6 +27,8 @@ class ManualReservationFormData {
   final int children;
   final int? priceYen;
   final String? phone;
+  final String? address;
+  final String? postalCode;
   final String? notes;
   final bool hasBreakfast;
   final bool hasDinner;
@@ -137,6 +141,8 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
   late final TextEditingController _childrenController;
   late final TextEditingController _priceController;
   late final TextEditingController _phoneController;
+  late final TextEditingController _postalCodeController;
+  late final TextEditingController _addressController;
   late final TextEditingController _notesController;
   late DateTime _checkIn;
   late DateTime _checkOut;
@@ -163,6 +169,12 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
       text: reservation?.priceYen?.toString() ?? '',
     );
     _phoneController = TextEditingController(text: reservation?.phone ?? '');
+    _postalCodeController = TextEditingController(
+      text: reservation?.postalCode ?? '',
+    );
+    _addressController = TextEditingController(
+      text: reservation?.address ?? '',
+    );
     _notesController = TextEditingController(
       text: reservation?.specialRequests ?? '',
     );
@@ -178,6 +190,8 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
     _childrenController.dispose();
     _priceController.dispose();
     _phoneController.dispose();
+    _postalCodeController.dispose();
+    _addressController.dispose();
     _notesController.dispose();
     super.dispose();
   }
@@ -221,6 +235,8 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
         children: int.parse(_childrenController.text),
         priceYen: int.tryParse(_priceController.text.replaceAll(',', '')),
         phone: _emptyToNull(_phoneController.text),
+        address: _emptyToNull(_addressController.text),
+        postalCode: _emptyToNull(_postalCodeController.text),
         notes: _emptyToNull(_notesController.text),
         hasBreakfast: _hasBreakfast,
         hasDinner: _hasDinner,
@@ -323,6 +339,22 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
                 TextFormField(
                   controller: _phoneController,
                   decoration: const InputDecoration(labelText: '電話番号'),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _postalCodeController,
+                  decoration: const InputDecoration(
+                    labelText: '郵便番号',
+                    hintText: '例：123-4567',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _addressController,
+                  decoration: const InputDecoration(labelText: '住所'),
+                  keyboardType: TextInputType.streetAddress,
+                  minLines: 1,
+                  maxLines: 2,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(

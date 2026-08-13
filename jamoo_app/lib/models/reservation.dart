@@ -16,6 +16,9 @@ class Reservation {
     required this.bookedOn,
     required this.status,
     this.phone,
+    this.email,
+    this.address,
+    this.postalCode,
     this.specialRequests,
     this.hasBreakfast,
     this.breakfastGuestCount,
@@ -39,6 +42,9 @@ class Reservation {
   final DateTime? bookedOn;
   final String? status;
   final String? phone;
+  final String? email;
+  final String? address;
+  final String? postalCode;
   final String? specialRequests;
   final bool? hasBreakfast;
   final int? breakfastGuestCount;
@@ -63,6 +69,9 @@ class Reservation {
       bookedOn: _readNullableDate(json['bookedOn']),
       status: _readNullableString(json['status']),
       phone: _readNullableString(json['phone']),
+      email: _readNullableString(json['email']),
+      address: _readNullableString(json['address']),
+      postalCode: _readNullableString(json['postalCode']),
       specialRequests: _readNullableString(json['specialRequests']),
       hasBreakfast: _readNullableBool(json['hasBreakfast']),
       breakfastGuestCount: _readNullableInt(json['breakfastGuestCount']),
@@ -89,6 +98,9 @@ class Reservation {
       'bookedOn': _dateToJson(bookedOn),
       'status': status,
       'phone': phone,
+      'email': email,
+      'address': address,
+      'postalCode': postalCode,
       'specialRequests': specialRequests,
       'hasBreakfast': hasBreakfast,
       'breakfastGuestCount': breakfastGuestCount,
@@ -155,6 +167,9 @@ class Reservation {
     DateTime? bookedOn,
     String? status,
     String? phone,
+    String? email,
+    String? address,
+    String? postalCode,
     String? specialRequests,
     bool? hasBreakfast,
     int? breakfastGuestCount,
@@ -178,6 +193,9 @@ class Reservation {
       bookedOn: bookedOn ?? this.bookedOn,
       status: status ?? this.status,
       phone: phone ?? this.phone,
+      email: email ?? this.email,
+      address: address ?? this.address,
+      postalCode: postalCode ?? this.postalCode,
       specialRequests: specialRequests ?? this.specialRequests,
       hasBreakfast: hasBreakfast ?? this.hasBreakfast,
       breakfastGuestCount: breakfastGuestCount ?? this.breakfastGuestCount,

@@ -52,6 +52,8 @@ class DatabaseReservationRepository {
     required int children,
     required int? priceYen,
     required String? phone,
+    required String? address,
+    required String? postalCode,
     required String? notes,
     required bool hasBreakfast,
     required bool hasDinner,
@@ -76,6 +78,8 @@ class DatabaseReservationRepository {
       'special_requests': _emptyToNull(notes),
       'raw_payload': jsonEncode({
         'manual': true,
+        'address': _emptyToNull(address),
+        'postalCode': _emptyToNull(postalCode),
         'hasBreakfast': hasBreakfast,
         'hasDinner': hasDinner,
       }),
@@ -230,6 +234,9 @@ class DatabaseReservationRepository {
       bookedOn: null,
       status: _readText(row['status']),
       phone: _readText(row['phone']),
+      email: _readText(row['email']),
+      address: _readText(rawData?['address']),
+      postalCode: _readText(rawData?['postalCode']),
       specialRequests: _readText(row['special_requests']),
       hasBreakfast: hasBreakfast,
       breakfastGuestCount: hasBreakfast == true
