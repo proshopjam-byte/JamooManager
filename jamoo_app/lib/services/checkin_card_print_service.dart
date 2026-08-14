@@ -128,18 +128,15 @@ class CheckinCardPrintService {
                   _wideRow(
                     japanese: 'ジャムーを何で\n知りましたか',
                     english: 'How did you find Jamoo?',
-                    value:
-                        '□ Booking.comなどのポータルサイト　　□ Jamoo公式HP\n'
-                        '□ SNS（Instagram・Facebook）　　□ その他\n'
-                        '□ ご紹介　お名前：　　　　　　　　　　　　　　　　　　　　　　',
+                    value: _discoverySource(reservation),
                     height: 58,
                     valueFontSize: 8.5,
                   ),
                   _standardRow(
-                    leftJapanese: '自署氏名（漢字等）',
-                    leftEnglish: 'Handwritten name',
+                    leftJapanese: '同行者氏名',
+                    leftEnglish: 'Family names',
                     leftValue: '',
-                    rightJapanese: '記載内容確認',
+                    rightJapanese: '代表者署名',
                     rightEnglish: 'Signature',
                     rightValue: '',
                   ),
@@ -303,6 +300,20 @@ class CheckinCardPrintService {
     return '〒$postalCode　$address';
   }
 
+  static String _discoverySource(Reservation reservation) {
+    final source = reservation.source.trim().toLowerCase();
+    final isPortal = source.contains('booking');
+    final isOfficialWebsite = source.contains('chillnn');
+
+    final portalBox = isPortal ? '■' : '□';
+    final officialWebsiteBox = isOfficialWebsite ? '■' : '□';
+
+    return '$portalBox Booking.comなどのポータルサイト　　'
+        '$officialWebsiteBox Jamoo公式HP\n'
+        '□ SNS（Instagram・Facebook）　　□ その他\n'
+        '□ ご紹介　お名前：　　　　　　　　　　　　　　　　　　　　　　';
+  }
+
   static String _facilityUse(Reservation reservation) {
     final configuredGuests = reservation.breakfastGuestCount;
     final totalGuests =
@@ -347,7 +358,10 @@ class CheckinCardPrintService {
         ? 'あり'
         : 'なし';
 
-    return '宿泊料金：$lodging　朝食：$breakfast　夕食：$dinner　その他：';
+    final room = reservation.roomName?.trim() ?? '';
+    final roomLine = room.isEmpty ? '' : '部屋：$room\n';
+
+    return '$roomLine宿泊料金：$lodging　朝食：$breakfast　夕食：$dinner　その他：';
   }
 
   static String _formatYen(int value) {

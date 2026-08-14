@@ -671,6 +671,117 @@ async function readReservationTable(container, targetDate) {
   return removeDuplicates(reservations);
 }
 
+async function updateReservationScroll(page, reset) {
+  let moved = false;
+
+  for (const frame of page.frames()) {
+    try {
+      const frameMoved = await frame.evaluate((shouldReset) => {
+        const root = document.scrollingElement;
+        const elements = [
+          root,
+          ...document.querySelectorAll('div, main, section, tbody'),
+        ].filter(Boolean);
+        const containers = [...new Set(elements)].filter((element) => {
+          if (element.scrollHeight <= element.clientHeight + 4) {
+            return false;
+          }
+
+          return (
+            element === root ||
+            element.querySelector('tr, [role="row"]') !== null
+          );
+        });
+
+        let changed = false;
+
+        for (const container of containers) {
+          const before = container.scrollTop;
+
+          if (shouldReset) {
+            container.scrollTop = 0;
+          } else {
+            const maximum =
+              container.scrollHeight - container.clientHeight;
+            const step = Math.max(240, container.clientHeight * 0.8);
+            container.scrollTop = Math.min(maximum, before + step);
+          }
+
+          container.dispatchEvent(
+            new Event('scroll', { bubbles: true })
+          );
+
+          if (container.scrollTop !== before) {
+            changed = true;
+          }
+        }
+
+        return changed;
+      }, reset);
+
+      moved = moved || frameMoved;
+    } catch (_) {
+      // Continue with other frames.
+    }
+  }
+
+  return moved;
+}
+
+async function readReservationPageWithScrolling(page, targetDate) {
+  const tableReservations = [];
+  const reservations = [];
+  const bodySnapshots = [];
+  let previousBodyText = null;
+
+  await updateReservationScroll(page, true);
+  await page.waitForTimeout(300);
+
+  for (let step = 0; step < 80; step += 1) {
+    for (const frame of page.frames()) {
+      try {
+        tableReservations.push(
+          ...(await readReservationTable(frame, targetDate))
+        );
+
+        const frameBodyText = await frame.locator('body').innerText();
+        reservations.push(
+          ...parseReservationListBody(frameBodyText, targetDate),
+          ...parseUpcomingReservations(frameBodyText, targetDate)
+        );
+
+        if (
+          frame === page.mainFrame() &&
+          frameBodyText !== previousBodyText
+        ) {
+          bodySnapshots.push(frameBodyText);
+          previousBodyText = frameBodyText;
+        }
+      } catch (_) {
+        // Continue with other frames.
+      }
+    }
+
+    const moved = await updateReservationScroll(page, false);
+
+    if (!moved) {
+      break;
+    }
+
+    await page.waitForTimeout(300);
+  }
+
+  return {
+    tableReservations: removeDuplicates(tableReservations),
+    reservations: removeDuplicates([
+      ...tableReservations,
+      ...reservations,
+    ]),
+    bodyText: bodySnapshots.join(
+      '\n\n===== 自動スクロール読取位置 =====\n\n'
+    ),
+  };
+}
 async function selectReservationPage(context, targetDate) {
   let best = null;
 
@@ -681,32 +792,13 @@ async function selectReservationPage(context, targetDate) {
       await candidate.waitForLoadState('domcontentloaded', {
         timeout: 10_000,
       });
-      const tableReservations = [];
-
-      for (const frame of candidate.frames()) {
-        try {
-          tableReservations.push(
-            ...(await readReservationTable(frame, targetDate))
-          );
-        } catch (_) {
-          // Continue with other frames.
-        }
-      }
-
-      const bodyText = await candidate.locator('body').innerText();
-      const bodyReservations = parseUpcomingReservations(
-        bodyText,
+      const scanned = await readReservationPageWithScrolling(
+        candidate,
         targetDate
       );
-      const listReservations = parseReservationListBody(
-        bodyText,
-        targetDate
-      );
-      const reservations = removeDuplicates([
-        ...tableReservations,
-        ...listReservations,
-        ...bodyReservations,
-      ]);
+      const tableReservations = scanned.tableReservations;
+      const reservations = scanned.reservations;
+      const bodyText = scanned.bodyText;
       const url = candidate.url();
       const title = await candidate.title();
       let reservationUrlBonus = 0;
@@ -747,6 +839,169 @@ async function selectReservationPage(context, targetDate) {
   return best;
 }
 
+async function findReservationPaginationControl(page, direction) {
+  const selectors = direction === 'next'
+    ? [
+        '[data-testid="pagination-next"]',
+        'button[aria-label*="Next page" i]',
+        'a[aria-label*="Next page" i]',
+        'button[aria-label*="次のページ"]',
+        'a[aria-label*="次のページ"]',
+      ]
+    : [
+        '[data-testid="pagination-previous"]',
+        'button[aria-label*="Previous page" i]',
+        'a[aria-label*="Previous page" i]',
+        'button[aria-label*="前のページ"]',
+        'a[aria-label*="前のページ"]',
+      ];
+
+  for (const frame of page.frames()) {
+    for (const selector of selectors) {
+      try {
+        const control = frame.locator(selector).first();
+
+        if (
+          (await control.count()) > 0 &&
+          (await control.isVisible())
+        ) {
+          return control;
+        }
+      } catch (_) {
+        // Try the next selector.
+      }
+    }
+
+    try {
+      const controls = frame.locator(
+        'nav button, nav a, ' +
+          '[role="navigation"] button, [role="navigation"] a'
+      );
+      const count = Math.min(await controls.count(), 100);
+
+      for (let index = 0; index < count; index += 1) {
+        const control = controls.nth(index);
+        const text = normalizeText(
+          [
+            await control.innerText().catch(() => ''),
+            await control.getAttribute('aria-label'),
+            await control.getAttribute('title'),
+          ]
+            .filter(Boolean)
+            .join(' ')
+        );
+
+        const matches = direction === 'next'
+          ? /next|次のページ|次へ|›|»/i.test(text)
+          : /previous|前のページ|前へ|‹|«/i.test(text);
+
+        if (matches && (await control.isVisible())) {
+          return control;
+        }
+      }
+    } catch (_) {
+      // Continue with other frames.
+    }
+  }
+
+  return null;
+}
+
+async function clickReservationPagination(page, direction) {
+  const control = await findReservationPaginationControl(
+    page,
+    direction
+  );
+
+  if (!control) {
+    return false;
+  }
+
+  const ariaDisabled = await control.getAttribute('aria-disabled');
+  const disabledAttribute = await control.getAttribute('disabled');
+  const className = (await control.getAttribute('class')) ?? '';
+  const disabled =
+    ariaDisabled === 'true' ||
+    disabledAttribute !== null ||
+    /\bdisabled\b/i.test(className) ||
+    (await control.isDisabled().catch(() => false));
+
+  if (disabled) {
+    return false;
+  }
+
+  try {
+    await control.scrollIntoViewIfNeeded();
+    await control.click();
+    await page.waitForTimeout(1500);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function moveToFirstReservationPage(page) {
+  for (let pageIndex = 0; pageIndex < 50; pageIndex += 1) {
+    const moved = await clickReservationPagination(page, 'previous');
+
+    if (!moved) {
+      return;
+    }
+  }
+}
+
+async function readAllReservationPages(page, targetDate) {
+  const reservations = [];
+  const bodyTexts = [];
+  const visitedPages = new Set();
+
+  await moveToFirstReservationPage(page);
+
+  for (let pageIndex = 0; pageIndex < 50; pageIndex += 1) {
+    const scanned = await readReservationPageWithScrolling(
+      page,
+      targetDate
+    );
+    const pageKey =
+      scanned.reservations
+        .map(
+          (reservation) =>
+            reservation.reservationNumber ??
+            `${reservation.guestName}|${reservation.checkIn}|` +
+              `${reservation.checkOut}`
+        )
+        .sort()
+        .join('|') ||
+      normalizeText(scanned.bodyText).slice(-2000);
+
+    if (visitedPages.has(pageKey)) {
+      break;
+    }
+
+    visitedPages.add(pageKey);
+    reservations.push(...scanned.reservations);
+    bodyTexts.push(
+      `===== 予約一覧 ${pageIndex + 1}ページ目 =====\n` +
+        scanned.bodyText
+    );
+
+    console.log(
+      `予約一覧${pageIndex + 1}ページ目: ` +
+        `${scanned.reservations.length}件`
+    );
+
+    const moved = await clickReservationPagination(page, 'next');
+
+    if (!moved) {
+      break;
+    }
+  }
+
+  return {
+    reservations: removeDuplicates(reservations),
+    bodyText: bodyTexts.join('\n\n'),
+  };
+}
 function mealPlanFromDetail(bodyText) {
   const text = normalizeText(bodyText);
   if (/\bonbreakfast\b/i.test(text)) {
@@ -881,13 +1136,13 @@ function writeJsonAtomic(filePath, data) {
 async function waitForUser(rl, targetDate) {
   console.log('');
   console.log('【Booking.comでの操作】');
-  console.log('取得対象は今日から1年先までの将来予約です。');
+  console.log('取得対象は直近7日前から1年先までです。');
   console.log(`開始日：${targetDate}（日本時間）`);
   console.log('');
   console.log('1. 必要ならログインしてください。');
   console.log('2. 「Reservations／予約」を開いてください。');
   console.log(
-    '3. チェックイン日を今日から1年先までにして、予約一覧を表示してください。'
+    '3. チェックイン日を開始日から1年先までにして、予約一覧を表示してください。'
   );
   console.log(
     '4. 表示件数を最大にし、一覧の最後までスクロールしてください。'
@@ -911,6 +1166,15 @@ async function main() {
   });
 
   const targetDate = formatJstDate();
+  const targetParts = targetDate.split('-').map(Number);
+  const lookbackDate = new Date(
+    Date.UTC(targetParts[0], targetParts[1] - 1, targetParts[2] - 7)
+  );
+  const collectionStartDate = [
+    lookbackDate.getUTCFullYear(),
+    String(lookbackDate.getUTCMonth() + 1).padStart(2, '0'),
+    String(lookbackDate.getUTCDate()).padStart(2, '0'),
+  ].join('-');
   const rl = readline.createInterface({
     input,
     output,
@@ -944,12 +1208,12 @@ async function main() {
       timeout: 60_000,
     });
 
-    await waitForUser(rl, targetDate);
+    await waitForUser(rl, collectionStartDate);
     await page.waitForTimeout(1500);
 
     const selected = await selectReservationPage(
       context,
-      targetDate
+      collectionStartDate
     );
 
     if (!selected) {
@@ -957,13 +1221,16 @@ async function main() {
     }
 
     const selectedPage = selected.page;
-    const bodyText = selected.bodyText;
+    const scannedPages = await readAllReservationPages(
+      selectedPage,
+      collectionStartDate
+    );
+    const bodyText = scannedPages.bodyText;
     const reservations = await enrichMealPlans(
       context,
       selectedPage,
-      selected.reservations
+      scannedPages.reservations
     );
-
     console.log(
       `読取対象: ${await selectedPage.title()} / ${selectedPage.url()}`
     );
