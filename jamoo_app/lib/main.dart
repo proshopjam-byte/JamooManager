@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'models/app_settings.dart';
 import 'models/reservation.dart';
 import 'models/reservation_data.dart';
+import 'pages/customer_list_page.dart';
 import 'pages/reservation_calendar_page.dart';
 import 'pages/settings_page.dart';
 import 'repositories/database_reservation_repository.dart';
@@ -236,6 +237,16 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
     }
   }
 
+  Future<void> _openCustomerList() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(builder: (context) => const CustomerListPage()),
+    );
+
+    if (mounted) {
+      _reload();
+    }
+  }
+
   Future<void> _syncFromBooking() async {
     if (_isSyncing || _isLoadingSettings) {
       return;
@@ -422,6 +433,11 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
             tooltip: '予約カレンダー',
             onPressed: _isLoadingSettings ? null : _openReservationCalendar,
             icon: const Icon(Icons.calendar_month_outlined),
+          ),
+          IconButton(
+            tooltip: '顧客一覧',
+            onPressed: _isLoadingSettings ? null : _openCustomerList,
+            icon: const Icon(Icons.people_alt_outlined),
           ),
           Padding(
             padding: const EdgeInsets.only(right: 8),
