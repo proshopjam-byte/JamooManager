@@ -1055,13 +1055,95 @@ function mealPlanFromPrice(reservation) {
   };
 }
 
-async function enrichMealPlans(context, reservationPage, reservations) {
+function extractPhoneNumber(value) {
+  const text = String(value ?? '').replace(/\u00a0/g, ' ');
+
+  const internationalMatch = text.match(
+    /\+\d[\d\s().-]{6,}\d/
+  );
+
+  if (internationalMatch) {
+    return normalizeText(internationalMatch[0]);
+  }
+
+  const domesticMatch = text.match(
+    /\b0\d{1,4}(?:[\s-]\d{1,4}){1,3}\b/
+  );
+
+  return domesticMatch
+    ? normalizeText(domesticMatch[0])
+    : null;
+}
+
+async function revealPhoneNumber(detailPage) {
+  for (const frame of detailPage.frames()) {
+    try {
+      const revealControl = frame
+        .getByText(/Show phone number|電話番号を表示/i)
+        .first();
+
+      if (
+        (await revealControl.count()) > 0 &&
+        (await revealControl.isVisible())
+      ) {
+        await revealControl.click();
+        await detailPage.waitForTimeout(800);
+        break;
+      }
+    } catch (_) {
+      // Continue and try reading an already displayed number.
+    }
+  }
+
+  for (const frame of detailPage.frames()) {
+    try {
+      const phoneLinks = frame.locator('a[href^="tel:"]');
+      const count = Math.min(await phoneLinks.count(), 10);
+
+      for (let index = 0; index < count; index += 1) {
+        const href = await phoneLinks.nth(index).getAttribute('href');
+        const phone = extractPhoneNumber(
+          decodeURIComponent((href ?? '').replace(/^tel:/i, ''))
+        );
+
+        if (phone) {
+          return phone;
+        }
+      }
+    } catch (_) {
+      // Try visible text next.
+    }
+  }
+
+  for (const frame of detailPage.frames()) {
+    try {
+      const bodyText = await frame.locator('body').innerText();
+      const phone = extractPhoneNumber(bodyText);
+
+      if (phone) {
+        return phone;
+      }
+    } catch (_) {
+      // Continue with other frames.
+    }
+  }
+
+  return null;
+}
+
+async function enrichMealPlans(
+  context,
+  reservationPage,
+  reservations,
+  targetDate
+) {
   const enriched = [];
 
   console.log('Booking.comの食事プランを確認しています...');
 
   for (const reservation of reservations) {
     const number = reservation.reservationNumber;
+    let phone = reservation.phone ?? null;
     let meal = {
       planName: null,
       hasBreakfast: null,
@@ -1084,9 +1166,23 @@ async function enrichMealPlans(context, reservationPage, reservations) {
               timeout: 60_000,
             });
             await detailPage.waitForTimeout(800);
-            meal = mealPlanFromDetail(
-              await detailPage.locator('body').innerText()
-            );
+            const detailBodyText = await detailPage
+              .locator('body')
+              .innerText();
+            meal = mealPlanFromDetail(detailBodyText);
+
+            if (reservation.checkIn === targetDate) {
+              phone =
+                (await revealPhoneNumber(detailPage)) ??
+                phone;
+
+              console.log(
+                `${reservation.guestName ?? number ?? '予約'}: ` +
+                  (phone
+                    ? '電話番号取得済み'
+                    : '電話番号未取得')
+              );
+            }
           } finally {
             await detailPage.close();
           }
@@ -1104,7 +1200,11 @@ async function enrichMealPlans(context, reservationPage, reservations) {
       `${reservation.guestName ?? number ?? '予約'}: ` +
         `${meal.planName ?? '食事プラン未設定'}`
     );
-    enriched.push({ ...reservation, ...meal });
+    enriched.push({
+      ...reservation,
+      ...meal,
+      phone,
+    });
   }
 
   return enriched;
@@ -1229,7 +1329,8 @@ async function main() {
     const reservations = await enrichMealPlans(
       context,
       selectedPage,
-      scannedPages.reservations
+      scannedPages.reservations,
+      targetDate
     );
     console.log(
       `読取対象: ${await selectedPage.title()} / ${selectedPage.url()}`

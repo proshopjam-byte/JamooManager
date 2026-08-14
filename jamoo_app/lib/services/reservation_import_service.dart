@@ -82,7 +82,7 @@ class ReservationImportService {
       'external_reservation_id': externalReservationId,
       'guest_name': _cleanText(reservation.guestName),
       'email': null,
-      'phone': null,
+      'phone': _cleanText(reservation.phone),
       'check_in': _formatDate(reservation.checkIn),
       'check_out': _formatDate(reservation.checkOut),
       'adults': reservation.adults ?? 0,
@@ -102,7 +102,7 @@ class ReservationImportService {
 
     final existing = await txn.query(
       'reservations',
-      columns: const ['id'],
+      columns: const ['id', 'phone'],
       where: 'source = ? AND external_reservation_id = ?',
       whereArgs: [source, externalReservationId],
       limit: 1,
@@ -121,6 +121,10 @@ class ReservationImportService {
     }
 
     final id = existing.first['id'] as int;
+
+    if (values['phone'] == null) {
+      values['phone'] = existing.first['phone'];
+    }
 
     await txn.update('reservations', values, where: 'id = ?', whereArgs: [id]);
 
