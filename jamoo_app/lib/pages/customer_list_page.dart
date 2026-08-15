@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/customer.dart';
 import '../repositories/customer_repository.dart';
+import '../services/customer_document_service.dart';
 
 class CustomerListPage extends StatefulWidget {
   const CustomerListPage({super.key});
@@ -12,6 +13,8 @@ class CustomerListPage extends StatefulWidget {
 
 class _CustomerListPageState extends State<CustomerListPage> {
   final CustomerRepository _repository = const CustomerRepository();
+  final CustomerDocumentService _documentService =
+      const CustomerDocumentService();
   final TextEditingController _searchController = TextEditingController();
   late Future<List<Customer>> _customersFuture;
 
@@ -168,6 +171,29 @@ class _CustomerListPageState extends State<CustomerListPage> {
     );
   }
 
+  Future<void> _openDocuments(Customer customer) async {
+    final updatedDraft = await showDialog<CustomerDraft>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _CustomerDocumentsDialog(
+        customer: customer,
+        repository: _repository,
+        documentService: _documentService,
+      ),
+    );
+    if (!mounted || updatedDraft == null) {
+      return;
+    }
+    await _repository.saveCustomer(updatedDraft, customerId: customer.id);
+    if (!mounted) {
+      return;
+    }
+    _reload();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('OCR候補を顧客情報へ反映しました。')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -244,6 +270,7 @@ class _CustomerListPageState extends State<CustomerListPage> {
                           customer: customer,
                         ),
                         onHistory: () => _showHistory(customer),
+                        onDocuments: () => _openDocuments(customer),
                       );
                     },
                   );
@@ -264,11 +291,13 @@ class _CustomerCard extends StatelessWidget {
     required this.customer,
     required this.onEdit,
     required this.onHistory,
+    required this.onDocuments,
   });
 
   final Customer customer;
   final VoidCallback onEdit;
   final VoidCallback onHistory;
+  final VoidCallback onDocuments;
 
   @override
   Widget build(BuildContext context) {
@@ -307,6 +336,11 @@ class _CustomerCard extends StatelessWidget {
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            TextButton.icon(
+              onPressed: onDocuments,
+              icon: const Icon(Icons.document_scanner_outlined),
+              label: const Text('書類'),
+            ),
             TextButton.icon(
               onPressed: onHistory,
               icon: const Icon(Icons.history),
@@ -684,6 +718,742 @@ class _CustomerHistoryDialog extends StatelessWidget {
         ),
       ],
     );
+  }
+}
+
+enum _CustomerOcrMode { local, cloud }
+
+class _CustomerDocumentsDialog extends StatefulWidget {
+  const _CustomerDocumentsDialog({
+    required this.customer,
+    required this.repository,
+    required this.documentService,
+  });
+
+  final Customer customer;
+  final CustomerRepository repository;
+  final CustomerDocumentService documentService;
+
+  @override
+  State<_CustomerDocumentsDialog> createState() =>
+      _CustomerDocumentsDialogState();
+}
+
+class _CustomerDocumentsDialogState extends State<_CustomerDocumentsDialog> {
+  late Future<List<CustomerDocument>> _documentsFuture;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  void _reload() {
+    setState(() {
+      _documentsFuture = widget.repository.loadCustomerDocuments(
+        widget.customer.id,
+      );
+    });
+  }
+
+  Future<void> _attach() async {
+    if (_busy) {
+      return;
+    }
+    setState(() => _busy = true);
+    try {
+      final document = await widget.documentService.pickAndAttach(
+        widget.customer.id,
+      );
+      if (!mounted || document == null) {
+        return;
+      }
+      _reload();
+      final ocrMode = await showDialog<_CustomerOcrMode>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('書類を添付しました'),
+          content: const Text(
+            '手書きの宿帳は「手書きOCR」、印刷文書は「標準OCR」を選択してください。',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('後で実行'),
+            ),
+            TextButton.icon(
+              onPressed: () => Navigator.pop(
+                context,
+                _CustomerOcrMode.local,
+              ),
+              icon: const Icon(Icons.document_scanner_outlined),
+              label: const Text('標準OCR'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(
+                context,
+                _CustomerOcrMode.cloud,
+              ),
+              icon: const Icon(Icons.cloud_outlined),
+              label: const Text('手書きOCR'),
+            ),
+          ],
+        ),
+      );
+      if (mounted && ocrMode != null) {
+        await _runOcr(document, mode: ocrMode);
+      }
+    } catch (error) {
+      if (mounted) {
+        await _showError('書類を添付できませんでした', error);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+      }
+    }
+  }
+
+  Future<void> _runOcr(
+    CustomerDocument document, {
+    _CustomerOcrMode mode = _CustomerOcrMode.local,
+  }) async {
+    if (_busy && document.ocrStatus != 'not_processed') {
+      return;
+    }
+    if (mode == _CustomerOcrMode.cloud) {
+      final configured = await _ensureCloudOcrApiKey();
+      if (!mounted || !configured) {
+        return;
+      }
+    }
+    setState(() => _busy = true);
+    try {
+      final result = await widget.documentService.runOcr(
+        document,
+        useCloud: mode == _CustomerOcrMode.cloud,
+      );
+      if (!mounted) {
+        return;
+      }
+      _reload();
+      final draft = await showDialog<CustomerDraft>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => _OcrReviewDialog(
+          customer: widget.customer,
+          result: result,
+        ),
+      );
+      if (!mounted || draft == null) {
+        return;
+      }
+      Navigator.pop(context, draft);
+    } catch (error) {
+      if (mounted) {
+        _reload();
+        await _showError('OCRを実行できませんでした', error);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+      }
+    }
+  }
+
+  Future<bool> _ensureCloudOcrApiKey({bool replaceExisting = false}) async {
+    if (!replaceExisting) {
+      final configured = await widget.documentService.hasCloudOcrApiKey();
+      if (configured) {
+        return true;
+      }
+    }
+    if (!mounted) {
+      return false;
+    }
+
+    var input = '';
+    var obscureText = true;
+    final apiKey = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Google Cloud Vision APIキー'),
+          content: SizedBox(
+            width: 560,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '手書きOCRでは宿帳画像をGoogle Cloudへ送信します。'
+                  'APIキーはこのPC内だけに保存されます。',
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  autofocus: true,
+                  obscureText: obscureText,
+                  onChanged: (value) {
+                    input = value;
+                    setDialogState(() {});
+                  },
+                  decoration: InputDecoration(
+                    labelText: 'Vision APIキー',
+                    border: const OutlineInputBorder(),
+                    suffixIcon: IconButton(
+                      tooltip: obscureText ? '表示する' : '隠す',
+                      onPressed: () {
+                        setDialogState(() => obscureText = !obscureText);
+                      },
+                      icon: Icon(
+                        obscureText
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('キャンセル'),
+            ),
+            FilledButton(
+              onPressed: input.trim().length < 20
+                  ? null
+                  : () => Navigator.pop(context, input.trim()),
+              child: const Text('保存'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (apiKey == null) {
+      return false;
+    }
+    await widget.documentService.saveCloudOcrApiKey(apiKey);
+    if (mounted && replaceExisting) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('手書きOCRのAPIキーを保存しました。')),
+      );
+    }
+    return true;
+  }
+
+  Future<void> _configureCloudOcr() async {
+    try {
+      await _ensureCloudOcrApiKey(replaceExisting: true);
+    } catch (error) {
+      if (mounted) {
+        await _showError('APIキーを保存できませんでした', error);
+      }
+    }
+  }
+
+  Future<void> _open(CustomerDocument document) async {
+    try {
+      await widget.documentService.openDocument(document);
+    } catch (error) {
+      if (mounted) {
+        await _showError('書類を開けませんでした', error);
+      }
+    }
+  }
+
+  Future<void> _delete(CustomerDocument document) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('添付書類を削除しますか？'),
+        content: Text(document.originalFileName),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('削除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) {
+      return;
+    }
+    try {
+      await widget.documentService.deleteDocument(document);
+      if (mounted) {
+        _reload();
+      }
+    } catch (error) {
+      if (mounted) {
+        await _showError('書類を削除できませんでした', error);
+      }
+    }
+  }
+
+  Future<void> _showError(String title, Object error) {
+    return showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: SelectableText(error.toString()),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('閉じる'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('${widget.customer.fullName}さんの添付書類'),
+      content: SizedBox(
+        width: 850,
+        height: 540,
+        child: Stack(
+          children: [
+            FutureBuilder<List<CustomerDocument>>(
+              future: _documentsFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snapshot.hasError) {
+                  return Center(child: SelectableText('${snapshot.error}'));
+                }
+                final documents =
+                    snapshot.data ?? const <CustomerDocument>[];
+                if (documents.isEmpty) {
+                  return const Center(
+                    child: Text('画像またはPDFを添付してください。'),
+                  );
+                }
+                return ListView.separated(
+                  itemCount: documents.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final document = documents[index];
+                    return ListTile(
+                      leading: Icon(
+                        document.mimeType == 'application/pdf'
+                            ? Icons.picture_as_pdf_outlined
+                            : Icons.image_outlined,
+                      ),
+                      title: Text(document.originalFileName),
+                      subtitle: Text(
+                        '${_formatDate(document.createdAt)}　'
+                        '${_ocrStatusLabel(document.ocrStatus)}',
+                      ),
+                      onTap: () => _open(document),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TextButton.icon(
+                            onPressed: _busy
+                                ? null
+                                : () => _runOcr(
+                                    document,
+                                    mode: _CustomerOcrMode.local,
+                                  ),
+                            icon: const Icon(Icons.document_scanner_outlined),
+                            label: const Text('標準OCR'),
+                          ),
+                          FilledButton.tonalIcon(
+                            onPressed: _busy
+                                ? null
+                                : () => _runOcr(
+                                    document,
+                                    mode: _CustomerOcrMode.cloud,
+                                  ),
+                            icon: const Icon(Icons.cloud_outlined),
+                            label: Text(
+                              document.hasOcrText ? '手書きOCR再実行' : '手書きOCR',
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: '削除',
+                            onPressed: _busy ? null : () => _delete(document),
+                            icon: const Icon(Icons.delete_outline),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+            if (_busy)
+              Positioned.fill(
+                child: ColoredBox(
+                  color: Theme.of(context).colorScheme.surface.withAlpha(210),
+                  child: const Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 12),
+                        Text('処理中です…'),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton.icon(
+          onPressed: _busy ? null : _configureCloudOcr,
+          icon: const Icon(Icons.key_outlined),
+          label: const Text('手書きOCR設定'),
+        ),
+        TextButton(
+          onPressed: _busy ? null : () => Navigator.pop(context),
+          child: const Text('閉じる'),
+        ),
+        FilledButton.icon(
+          onPressed: _busy ? null : _attach,
+          icon: const Icon(Icons.attach_file),
+          label: const Text('画像・PDFを追加'),
+        ),
+      ],
+    );
+  }
+
+  static String _ocrStatusLabel(String status) {
+    switch (status) {
+      case 'processing':
+        return 'OCR処理中';
+      case 'completed':
+        return 'OCR済み';
+      case 'failed':
+        return 'OCR失敗';
+      default:
+        return 'OCR未実行';
+    }
+  }
+}
+
+class _OcrReviewDialog extends StatefulWidget {
+  const _OcrReviewDialog({required this.customer, required this.result});
+
+  final Customer customer;
+  final CustomerOcrResult result;
+
+  @override
+  State<_OcrReviewDialog> createState() => _OcrReviewDialogState();
+}
+
+class _OcrReviewDialogState extends State<_OcrReviewDialog> {
+  int _selectedPageIndex = 0;
+  late final TextEditingController _nameController;
+  late final TextEditingController _emailController;
+  late final TextEditingController _phoneController;
+  late final TextEditingController _postalCodeController;
+  late final TextEditingController _addressController;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(
+      text: _preferExisting(widget.customer.fullName, widget.result.fullName),
+    );
+    _emailController = TextEditingController(
+      text: _preferExisting(widget.customer.email, widget.result.email),
+    );
+    _phoneController = TextEditingController(
+      text: _preferExisting(widget.customer.phone, widget.result.phone),
+    );
+    _postalCodeController = TextEditingController(
+      text: _preferExisting(
+        widget.customer.postalCode,
+        widget.result.postalCode,
+      ),
+    );
+    _addressController = TextEditingController(
+      text: _preferExisting(widget.customer.address, widget.result.address),
+    );
+  }
+
+  CustomerOcrPageResult? get _selectedPage {
+    final pages = widget.result.pages;
+    if (pages.isEmpty || _selectedPageIndex >= pages.length) {
+      return null;
+    }
+    return pages[_selectedPageIndex];
+  }
+
+  String? get _fullNameSuggestion =>
+      _selectedPage?.fullName ?? widget.result.fullName;
+  String? get _emailSuggestion =>
+      _selectedPage?.email ?? widget.result.email;
+  String? get _phoneSuggestion =>
+      _selectedPage?.phone ?? widget.result.phone;
+  String? get _postalCodeSuggestion =>
+      _selectedPage?.postalCode ?? widget.result.postalCode;
+  String? get _addressSuggestion =>
+      _selectedPage?.address ?? widget.result.address;
+  String get _rawText => _selectedPage?.rawText ?? widget.result.rawText;
+
+  void _selectPage(int? index) {
+    if (index == null || index == _selectedPageIndex) {
+      return;
+    }
+    setState(() => _selectedPageIndex = index);
+    _nameController.text = _preferExisting(
+      widget.customer.fullName,
+      _fullNameSuggestion,
+    );
+    _emailController.text = _preferExisting(
+      widget.customer.email,
+      _emailSuggestion,
+    );
+    _phoneController.text = _preferExisting(
+      widget.customer.phone,
+      _phoneSuggestion,
+    );
+    _postalCodeController.text = _preferExisting(
+      widget.customer.postalCode,
+      _postalCodeSuggestion,
+    );
+    _addressController.text = _preferExisting(
+      widget.customer.address,
+      _addressSuggestion,
+    );
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    _postalCodeController.dispose();
+    _addressController.dispose();
+    super.dispose();
+  }
+
+  void _apply() {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      return;
+    }
+    Navigator.pop(
+      context,
+      CustomerDraft(
+        fullName: name,
+        email: _emptyToNull(_emailController.text),
+        phone: _emptyToNull(_phoneController.text),
+        postalCode: _emptyToNull(_postalCodeController.text),
+        address: _emptyToNull(_addressController.text),
+        notes: widget.customer.notes,
+      ),
+    );
+  }
+
+  InputDecoration _fieldDecoration({
+    required String label,
+    required TextEditingController controller,
+    required String? suggestion,
+    int helperMaxLines = 1,
+  }) {
+    final candidate = suggestion?.trim() ?? '';
+    final hasCandidate = candidate.isNotEmpty;
+
+    return InputDecoration(
+      labelText: label,
+      border: const OutlineInputBorder(),
+      helperText: hasCandidate ? 'OCR候補: $candidate' : 'OCR候補: 読み取りなし',
+      helperMaxLines: helperMaxLines,
+      suffixIcon: hasCandidate
+          ? IconButton(
+              tooltip: 'OCR候補を入力欄へ反映',
+              onPressed: () {
+                controller
+                  ..text = candidate
+                  ..selection = TextSelection.collapsed(
+                    offset: candidate.length,
+                  );
+              },
+              icon: const Icon(Icons.arrow_upward),
+            )
+          : null,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('OCR結果を確認'),
+      content: SizedBox(
+        width: 850,
+        height: 620,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '入力欄は現在の顧客情報を優先しています。'
+              '下に表示されるOCR候補と原本を確認し、必要な項目だけ修正してください。',
+            ),
+            if (widget.result.pages.length > 1) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(Icons.description_outlined, size: 20),
+                  const SizedBox(width: 8),
+                  const Text('確認するページ:'),
+                  const SizedBox(width: 12),
+                  DropdownButton<int>(
+                    value: _selectedPageIndex,
+                    onChanged: _selectPage,
+                    items: [
+                      for (
+                        var index = 0;
+                        index < widget.result.pages.length;
+                        index++
+                      )
+                        DropdownMenuItem<int>(
+                          value: index,
+                          child: Text(
+                            '${widget.result.pages[index].pageNumber}ページ目',
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(width: 12),
+                  const Text('ページを切り替えると入力欄もリセットされます。'),
+                ],
+              ),
+            ],
+            if (widget.result.warning != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                widget.result.warning!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _nameController,
+                    decoration: _fieldDecoration(
+                      label: '氏名',
+                      controller: _nameController,
+                      suggestion: _fullNameSuggestion,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _phoneController,
+                    decoration: _fieldDecoration(
+                      label: '電話番号',
+                      controller: _phoneController,
+                      suggestion: _phoneSuggestion,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _emailController,
+              decoration: _fieldDecoration(
+                label: 'メールアドレス',
+                controller: _emailController,
+                suggestion: _emailSuggestion,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 180,
+                  child: TextField(
+                    controller: _postalCodeController,
+                    decoration: _fieldDecoration(
+                      label: '郵便番号',
+                      controller: _postalCodeController,
+                      suggestion: _postalCodeSuggestion,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _addressController,
+                    minLines: 2,
+                    maxLines: 3,
+                    decoration: _fieldDecoration(
+                      label: '住所',
+                      controller: _addressController,
+                      suggestion: _addressSuggestion,
+                      helperMaxLines: 2,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'OCRが読み取った全文（参考）',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 6),
+            Expanded(
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Theme.of(context).dividerColor),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: SingleChildScrollView(
+                  child: SelectableText(
+                    _rawText.isEmpty
+                        ? '文字を認識できませんでした。'
+                        : _rawText,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('反映しない'),
+        ),
+        FilledButton.icon(
+          onPressed: _apply,
+          icon: const Icon(Icons.check),
+          label: const Text('顧客情報へ反映'),
+        ),
+      ],
+    );
+  }
+
+  static String _preferExisting(String? existing, String? suggestion) {
+    final current = existing?.trim();
+    if (current != null && current.isNotEmpty) {
+      return current;
+    }
+    return suggestion?.trim() ?? '';
   }
 }
 

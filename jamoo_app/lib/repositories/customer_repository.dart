@@ -233,6 +233,83 @@ class CustomerRepository {
     return rows.map(_candidateFromRow).toList(growable: false);
   }
 
+  Future<CustomerDocument> addCustomerDocument({
+    required int customerId,
+    required String originalFileName,
+    required String storedFilePath,
+    required String mimeType,
+  }) async {
+    final db = await DatabaseService.instance.database;
+    final now = DateTime.now().toUtc().toIso8601String();
+    final id = await db.insert('customer_documents', {
+      'customer_id': customerId,
+      'original_file_name': originalFileName,
+      'stored_file_path': storedFilePath,
+      'mime_type': mimeType,
+      'ocr_text': null,
+      'ocr_status': 'not_processed',
+      'created_at': now,
+      'updated_at': now,
+    });
+    final rows = await db.query(
+      'customer_documents',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    return CustomerDocument.fromRow(rows.single);
+  }
+
+  Future<List<CustomerDocument>> loadCustomerDocuments(int customerId) async {
+    final db = await DatabaseService.instance.database;
+    final rows = await db.query(
+      'customer_documents',
+      where: 'customer_id = ?',
+      whereArgs: [customerId],
+      orderBy: 'created_at DESC, id DESC',
+    );
+    return rows.map(CustomerDocument.fromRow).toList(growable: false);
+  }
+
+  Future<void> updateDocumentOcr({
+    required int documentId,
+    required String status,
+    String? ocrText,
+  }) async {
+    final db = await DatabaseService.instance.database;
+    await db.update(
+      'customer_documents',
+      {
+        'ocr_status': status,
+        'ocr_text': customerCleanText(ocrText),
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [documentId],
+    );
+  }
+
+  Future<String?> deleteCustomerDocument(int documentId) async {
+    final db = await DatabaseService.instance.database;
+    final rows = await db.query(
+      'customer_documents',
+      columns: const ['stored_file_path'],
+      where: 'id = ?',
+      whereArgs: [documentId],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      return null;
+    }
+    final path = customerCleanText(rows.single['stored_file_path']);
+    await db.delete(
+      'customer_documents',
+      where: 'id = ?',
+      whereArgs: [documentId],
+    );
+    return path;
+  }
+
   CustomerReservationCandidate _candidateFromRow(Map<String, Object?> row) {
     final raw = _readJson(row['raw_payload']);
     return CustomerReservationCandidate(

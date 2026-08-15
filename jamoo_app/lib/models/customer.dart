@@ -145,6 +145,129 @@ class CustomerStay {
   final int? priceYen;
 }
 
+class CustomerDocument {
+  const CustomerDocument({
+    required this.id,
+    required this.customerId,
+    required this.originalFileName,
+    required this.storedFilePath,
+    required this.ocrStatus,
+    required this.createdAt,
+    required this.updatedAt,
+    this.mimeType,
+    this.ocrText,
+  });
+
+  final int id;
+  final int customerId;
+  final String originalFileName;
+  final String storedFilePath;
+  final String? mimeType;
+  final String? ocrText;
+  final String ocrStatus;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  bool get hasOcrText => ocrText != null && ocrText!.trim().isNotEmpty;
+
+  factory CustomerDocument.fromRow(Map<String, Object?> row) {
+    return CustomerDocument(
+      id: _readInt(row['id']) ?? 0,
+      customerId: _readInt(row['customer_id']) ?? 0,
+      originalFileName:
+          _readText(row['original_file_name']) ?? '添付ファイル',
+      storedFilePath: _readText(row['stored_file_path']) ?? '',
+      mimeType: _readText(row['mime_type']),
+      ocrText: _readText(row['ocr_text']),
+      ocrStatus: _readText(row['ocr_status']) ?? 'not_processed',
+      createdAt: _readDate(row['created_at']) ?? DateTime.now(),
+      updatedAt: _readDate(row['updated_at']) ?? DateTime.now(),
+    );
+  }
+}
+
+class CustomerOcrResult {
+  const CustomerOcrResult({
+    required this.rawText,
+    this.pages = const <CustomerOcrPageResult>[],
+    this.fullName,
+    this.email,
+    this.phone,
+    this.postalCode,
+    this.address,
+    this.warning,
+  });
+
+  final String rawText;
+  final List<CustomerOcrPageResult> pages;
+  final String? fullName;
+  final String? email;
+  final String? phone;
+  final String? postalCode;
+  final String? address;
+  final String? warning;
+
+  factory CustomerOcrResult.fromJson(Map<String, dynamic> json) {
+    final suggestions = json['suggestions'];
+    final values = suggestions is Map<String, dynamic>
+        ? suggestions
+        : const <String, dynamic>{};
+    final rawPages = json['pages'];
+    final pages = rawPages is List
+        ? rawPages
+              .whereType<Map<String, dynamic>>()
+              .map(CustomerOcrPageResult.fromJson)
+              .toList(growable: false)
+        : const <CustomerOcrPageResult>[];
+    return CustomerOcrResult(
+      rawText: json['text']?.toString() ?? '',
+      pages: pages,
+      fullName: customerCleanText(values['fullName']),
+      email: customerCleanText(values['email']),
+      phone: customerCleanText(values['phone']),
+      postalCode: customerCleanText(values['postalCode']),
+      address: customerCleanText(values['address']),
+      warning: customerCleanText(json['warning']),
+    );
+  }
+}
+
+class CustomerOcrPageResult {
+  const CustomerOcrPageResult({
+    required this.pageNumber,
+    required this.rawText,
+    this.fullName,
+    this.email,
+    this.phone,
+    this.postalCode,
+    this.address,
+  });
+
+  final int pageNumber;
+  final String rawText;
+  final String? fullName;
+  final String? email;
+  final String? phone;
+  final String? postalCode;
+  final String? address;
+
+  factory CustomerOcrPageResult.fromJson(Map<String, dynamic> json) {
+    final suggestions = json['suggestions'];
+    final values = suggestions is Map<String, dynamic>
+        ? suggestions
+        : const <String, dynamic>{};
+    return CustomerOcrPageResult(
+      pageNumber: _readInt(json['pageNumber']) ?? 1,
+      rawText: json['text']?.toString() ?? '',
+      fullName: customerCleanText(values['fullName']),
+      email: customerCleanText(values['email']),
+      phone: customerCleanText(values['phone']),
+      postalCode: customerCleanText(values['postalCode']),
+      address: customerCleanText(values['address']),
+    );
+  }
+}
+
 String? customerCleanText(Object? value) {
   final text = value?.toString().trim();
   return text == null || text.isEmpty ? null : text;

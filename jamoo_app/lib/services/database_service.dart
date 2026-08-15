@@ -10,7 +10,7 @@ class DatabaseService {
   static final DatabaseService instance = DatabaseService._();
 
   static const String databaseFileName = 'jamoo_manager.db';
-  static const int databaseVersion = 2;
+  static const int databaseVersion = 3;
 
   Database? _database;
 
@@ -203,12 +203,16 @@ class DatabaseService {
       ''');
 
       await _createMealOverridesTable(txn);
+      await _createCustomerDocumentsTable(txn);
     });
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
       await _createMealOverridesTable(db);
+    }
+    if (oldVersion < 3) {
+      await _createCustomerDocumentsTable(db);
     }
   }
 
@@ -223,6 +227,32 @@ class DatabaseService {
           REFERENCES reservations(id)
           ON DELETE CASCADE
       )
+    ''');
+  }
+
+  static Future<void> _createCustomerDocumentsTable(
+    DatabaseExecutor db,
+  ) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS customer_documents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id INTEGER NOT NULL,
+        original_file_name TEXT NOT NULL,
+        stored_file_path TEXT NOT NULL,
+        mime_type TEXT,
+        ocr_text TEXT,
+        ocr_status TEXT NOT NULL DEFAULT 'not_processed',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(customer_id)
+          REFERENCES customers(id)
+          ON DELETE CASCADE
+      )
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_customer_documents_customer_id
+      ON customer_documents(customer_id)
     ''');
   }
 
