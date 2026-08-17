@@ -4,6 +4,7 @@ import '../models/customer.dart';
 import '../repositories/customer_repository.dart';
 import '../services/customer_document_service.dart';
 import '../services/customer_export_service.dart';
+import '../widgets/postal_code_lookup_button.dart';
 
 class CustomerListPage extends StatefulWidget {
   const CustomerListPage({super.key});
@@ -847,6 +848,11 @@ class _CardImportReviewDialogState extends State<_CardImportReviewDialog> {
                   ),
                 ],
               ),
+              const SizedBox(height: 8),
+              PostalCodeLookupButton(
+                addressController: _addressController,
+                postalCodeController: _postalCodeController,
+              ),
               const SizedBox(height: 12),
               Text(
                 'OCRが読み取った全文（参考）',
@@ -1153,6 +1159,11 @@ class _CustomerEditDialogState extends State<_CustomerEditDialog> {
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 8),
+                PostalCodeLookupButton(
+                  addressController: _addressController,
+                  postalCodeController: _postalCodeController,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
@@ -2109,6 +2120,11 @@ class _OcrReviewDialogState extends State<_OcrReviewDialog> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 8),
+            PostalCodeLookupButton(
+              addressController: _addressController,
+              postalCodeController: _postalCodeController,
             ),
             const SizedBox(height: 12),
             Text(

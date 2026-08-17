@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/reservation.dart';
+import '../widgets/postal_code_lookup_button.dart';
 
 class ManualReservationFormData {
   const ManualReservationFormData({
@@ -355,6 +356,11 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
                   keyboardType: TextInputType.streetAddress,
                   minLines: 1,
                   maxLines: 2,
+                ),
+                const SizedBox(height: 8),
+                PostalCodeLookupButton(
+                  addressController: _addressController,
+                  postalCodeController: _postalCodeController,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
