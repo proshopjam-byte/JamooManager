@@ -10,6 +10,10 @@ class Customer {
     this.phone,
     this.postalCode,
     this.address,
+    this.country,
+    this.reservationSources = const <String>[],
+    this.activeReservationCount = 0,
+    this.cancelledReservationCount = 0,
     this.firstStayDate,
     this.lastStayDate,
     this.notes,
@@ -21,6 +25,10 @@ class Customer {
   final String? phone;
   final String? postalCode;
   final String? address;
+  final String? country;
+  final List<String> reservationSources;
+  final int activeReservationCount;
+  final int cancelledReservationCount;
   final DateTime? firstStayDate;
   final DateTime? lastStayDate;
   final int stayCount;
@@ -28,6 +36,26 @@ class Customer {
   final String? notes;
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  String get reservationSourceLabel {
+    if (reservationSources.isEmpty) {
+      return '未連携';
+    }
+    return reservationSources.map(_reservationSourceLabel).join(' / ');
+  }
+
+  String get reservationStatusLabel {
+    if (activeReservationCount > 0) {
+      return cancelledReservationCount > 0 ? '有効予約（キャンセル履歴あり）' : '有効予約';
+    }
+    if (cancelledReservationCount > 0) {
+      return 'キャンセル';
+    }
+    return '予約未連携';
+  }
+
+  bool get isCancelledOnly =>
+      activeReservationCount == 0 && cancelledReservationCount > 0;
 
   factory Customer.fromRow(Map<String, Object?> row) {
     return Customer(
@@ -37,6 +65,14 @@ class Customer {
       phone: _readText(row['phone']),
       postalCode: _readText(row['postal_code']),
       address: _readText(row['address']),
+      country: _readText(row['country']),
+      reservationSources: _readReservationSources(
+        row['calculated_reservation_sources'],
+      ),
+      activeReservationCount:
+          _readInt(row['calculated_active_reservation_count']) ?? 0,
+      cancelledReservationCount:
+          _readInt(row['calculated_cancelled_reservation_count']) ?? 0,
       firstStayDate: _readDate(
         row['calculated_first_stay_date'] ?? row['first_stay_date'],
       ),
@@ -58,6 +94,37 @@ class Customer {
   }
 }
 
+List<String> _readReservationSources(Object? value) {
+  final raw = _readText(value);
+  if (raw == null) {
+    return const <String>[];
+  }
+  final values = <String>[];
+  final seen = <String>{};
+  for (final source in raw.split(',')) {
+    final cleaned = source.trim();
+    if (cleaned.isEmpty || !seen.add(cleaned.toLowerCase())) {
+      continue;
+    }
+    values.add(cleaned);
+  }
+  return List<String>.unmodifiable(values);
+}
+
+String _reservationSourceLabel(String source) {
+  switch (source.trim().toUpperCase()) {
+    case 'MANUAL':
+      return '手入力';
+    case 'BOOKING':
+    case 'BOOKING.COM':
+      return 'Booking.com';
+    case 'CHILLNN':
+      return 'CHILLNN';
+    default:
+      return source.trim();
+  }
+}
+
 class CustomerDraft {
   const CustomerDraft({
     required this.fullName,
@@ -65,6 +132,7 @@ class CustomerDraft {
     this.phone,
     this.postalCode,
     this.address,
+    this.country,
     this.notes,
   });
 
@@ -73,6 +141,7 @@ class CustomerDraft {
   final String? phone;
   final String? postalCode;
   final String? address;
+  final String? country;
   final String? notes;
 
   factory CustomerDraft.fromCustomer(Customer customer) {
@@ -82,6 +151,7 @@ class CustomerDraft {
       phone: customer.phone,
       postalCode: customer.postalCode,
       address: customer.address,
+      country: customer.country,
       notes: customer.notes,
     );
   }
@@ -174,8 +244,7 @@ class CustomerDocument {
     return CustomerDocument(
       id: _readInt(row['id']) ?? 0,
       customerId: _readInt(row['customer_id']) ?? 0,
-      originalFileName:
-          _readText(row['original_file_name']) ?? '添付ファイル',
+      originalFileName: _readText(row['original_file_name']) ?? '添付ファイル',
       storedFilePath: _readText(row['stored_file_path']) ?? '',
       mimeType: _readText(row['mime_type']),
       ocrText: _readText(row['ocr_text']),
@@ -195,6 +264,7 @@ class CustomerOcrResult {
     this.phone,
     this.postalCode,
     this.address,
+    this.country,
     this.warning,
   });
 
@@ -205,6 +275,7 @@ class CustomerOcrResult {
   final String? phone;
   final String? postalCode;
   final String? address;
+  final String? country;
   final String? warning;
 
   factory CustomerOcrResult.fromJson(Map<String, dynamic> json) {
@@ -227,6 +298,7 @@ class CustomerOcrResult {
       phone: customerCleanText(values['phone']),
       postalCode: customerCleanText(values['postalCode']),
       address: customerCleanText(values['address']),
+      country: customerCleanText(values['country']),
       warning: customerCleanText(json['warning']),
     );
   }
@@ -241,6 +313,10 @@ class CustomerOcrPageResult {
     this.phone,
     this.postalCode,
     this.address,
+    this.country,
+    this.attachmentPath,
+    this.attachmentFileName,
+    this.attachmentMimeType,
   });
 
   final int pageNumber;
@@ -250,6 +326,10 @@ class CustomerOcrPageResult {
   final String? phone;
   final String? postalCode;
   final String? address;
+  final String? country;
+  final String? attachmentPath;
+  final String? attachmentFileName;
+  final String? attachmentMimeType;
 
   factory CustomerOcrPageResult.fromJson(Map<String, dynamic> json) {
     final suggestions = json['suggestions'];
@@ -264,6 +344,10 @@ class CustomerOcrPageResult {
       phone: customerCleanText(values['phone']),
       postalCode: customerCleanText(values['postalCode']),
       address: customerCleanText(values['address']),
+      country: customerCleanText(values['country']),
+      attachmentPath: customerCleanText(json['attachmentPath']),
+      attachmentFileName: customerCleanText(json['attachmentFileName']),
+      attachmentMimeType: customerCleanText(json['attachmentMimeType']),
     );
   }
 }

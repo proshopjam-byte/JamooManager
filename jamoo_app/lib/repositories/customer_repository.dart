@@ -14,24 +14,48 @@ class CustomerRepository {
     final where = cleaned.isEmpty
         ? ''
         : 'WHERE c.full_name LIKE ? OR c.phone LIKE ? OR c.email LIKE ? '
-              'OR c.postal_code LIKE ? OR c.address LIKE ?';
+              'OR c.postal_code LIKE ? OR c.address LIKE ? '
+              'OR c.country LIKE ?';
     final args = cleaned.isEmpty
         ? <Object?>[]
-        : List<Object?>.filled(5, '%$cleaned%');
+        : List<Object?>.filled(6, '%$cleaned%');
 
     final rows = await db.rawQuery('''
       SELECT
         c.*,
-        MIN(r.check_in) AS calculated_first_stay_date,
-        MAX(r.check_in) AS calculated_last_stay_date,
-        COUNT(r.id) AS calculated_stay_count,
-        COALESCE(SUM(COALESCE(r.price_yen, 0)), 0)
-          AS calculated_total_spend_yen
+        MIN(
+          CASE WHEN LOWER(COALESCE(r.status, 'confirmed'))
+            NOT IN ('cancelled', 'canceled') THEN r.check_in END
+        ) AS calculated_first_stay_date,
+        MAX(
+          CASE WHEN LOWER(COALESCE(r.status, 'confirmed'))
+            NOT IN ('cancelled', 'canceled') THEN r.check_in END
+        ) AS calculated_last_stay_date,
+        COALESCE(SUM(
+          CASE WHEN r.id IS NOT NULL
+            AND LOWER(COALESCE(r.status, 'confirmed'))
+              NOT IN ('cancelled', 'canceled') THEN 1 ELSE 0 END
+        ), 0) AS calculated_stay_count,
+        COALESCE(SUM(
+          CASE WHEN LOWER(COALESCE(r.status, 'confirmed'))
+            NOT IN ('cancelled', 'canceled')
+            THEN COALESCE(r.price_yen, 0) ELSE 0 END
+        ), 0) AS calculated_total_spend_yen,
+        COALESCE(SUM(
+          CASE WHEN r.id IS NOT NULL
+            AND LOWER(COALESCE(r.status, 'confirmed'))
+              NOT IN ('cancelled', 'canceled') THEN 1 ELSE 0 END
+        ), 0) AS calculated_active_reservation_count,
+        COALESCE(SUM(
+          CASE WHEN r.id IS NOT NULL
+            AND LOWER(COALESCE(r.status, 'confirmed'))
+              IN ('cancelled', 'canceled') THEN 1 ELSE 0 END
+        ), 0) AS calculated_cancelled_reservation_count,
+        GROUP_CONCAT(DISTINCT CASE WHEN r.id IS NOT NULL THEN r.source END)
+          AS calculated_reservation_sources
       FROM customers c
       LEFT JOIN reservations r
-        ON LOWER(COALESCE(r.status, 'confirmed'))
-             NOT IN ('cancelled', 'canceled')
-       AND (
+        ON (
          r.id IN (
            SELECT linked.reservation_id
            FROM stays linked
@@ -51,7 +75,14 @@ class CustomerRepository {
       $where
       GROUP BY c.id
       ORDER BY
-        CASE WHEN MAX(r.check_in) IS NULL THEN 1 ELSE 0 END,
+        CASE WHEN MAX(
+          CASE WHEN LOWER(COALESCE(r.status, 'confirmed'))
+            NOT IN ('cancelled', 'canceled') THEN r.check_in END
+        ) IS NULL THEN 1 ELSE 0 END,
+        MAX(
+          CASE WHEN LOWER(COALESCE(r.status, 'confirmed'))
+            NOT IN ('cancelled', 'canceled') THEN r.check_in END
+        ) DESC,
         MAX(r.check_in) DESC,
         c.full_name COLLATE NOCASE ASC
     ''', args);
@@ -112,6 +143,7 @@ class CustomerRepository {
       'phone': customerCleanText(draft.phone),
       'postal_code': customerCleanText(draft.postalCode),
       'address': customerCleanText(draft.address),
+      'country': customerCleanText(draft.country),
       'notes': customerCleanText(draft.notes),
       'updated_at': now,
     };
@@ -168,10 +200,7 @@ class CustomerRepository {
       'updated_at': now,
     };
     if (existing.isEmpty) {
-      await txn.insert('stays', {
-        ...values,
-        'created_at': now,
-      });
+      await txn.insert('stays', {...values, 'created_at': now});
     } else {
       await txn.update(
         'stays',
@@ -199,8 +228,7 @@ class CustomerRepository {
         .map(
           (row) => CustomerStay(
             source: row['source']?.toString() ?? '',
-            reservationNumber:
-                row['external_reservation_id']?.toString() ?? '',
+            reservationNumber: row['external_reservation_id']?.toString() ?? '',
             checkIn: DateTime.tryParse(row['check_in']?.toString() ?? ''),
             checkOut: DateTime.tryParse(row['check_out']?.toString() ?? ''),
             roomName: customerCleanText(row['room_name']),
@@ -325,9 +353,7 @@ class CustomerRepository {
           customerCleanText(row['email']) ?? customerCleanText(raw?['email']),
       phone:
           customerCleanText(row['phone']) ?? customerCleanText(raw?['phone']),
-      postalCode: customerCleanText(
-        raw?['postalCode'] ?? raw?['postal_code'],
-      ),
+      postalCode: customerCleanText(raw?['postalCode'] ?? raw?['postal_code']),
       address: customerCleanText(raw?['address']),
     );
   }
