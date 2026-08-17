@@ -14,10 +14,38 @@ WINDOWS_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 VISION_API_URL = "https://vision.googleapis.com/v1/images:annotate"
 FIELD_BOUNDS = {
     "fullName": (0.185, 0.012, 0.820, 0.145),
-    "address": (0.185, 0.145, 0.680, 0.275),
+    "address": (0.185, 0.145, 0.820, 0.275),
     "phone": (0.650, 0.145, 0.995, 0.275),
-    "email": (0.185, 0.585, 0.805, 0.705),
+    "country": (0.185, 0.585, 0.560, 0.770),
+    "email": (0.185, 0.700, 0.850, 0.900),
 }
+COUNTRY_ALIASES = (
+    (r"(?:日本|\bJapanese\b|\bJapan\b)", "Japan"),
+    (r"(?:\bAustralian\b|\bAustralia\b)", "Australia"),
+    (r"(?:\bFrench\b|\bFrance\b)", "France"),
+    (r"(?:\bGerman\b|\bGermany\b)", "Germany"),
+    (r"(?:\bBritish\b|\bUnited Kingdom\b|\bUK\b)", "United Kingdom"),
+    (r"(?:\bAmerican\b|\bUnited States\b|\bUSA\b)", "United States"),
+    (r"(?:\bCanadian\b|\bCanada\b)", "Canada"),
+    (r"(?:\bChinese\b|\bChina\b)", "China"),
+    (r"(?:\bKorean\b|\bSouth Korea\b|\bKorea\b)", "South Korea"),
+    (r"(?:\bTaiwanese\b|\bTaiwan\b)", "Taiwan"),
+    (r"(?:\bItalian\b|\bItaly\b)", "Italy"),
+    (r"(?:\bSpanish\b|\bSpain\b)", "Spain"),
+    (r"(?:\bDutch\b|\bNetherlands\b)", "Netherlands"),
+    (r"(?:\bSwiss\b|\bSwitzerland\b)", "Switzerland"),
+    (r"(?:\bAustrian\b|\bAustria\b)", "Austria"),
+    (r"(?:\bIndian\b|\bIndia\b)", "India"),
+    (r"(?:\bThai\b|\bThailand\b)", "Thailand"),
+    (r"(?:\bVietnamese\b|\bVietnam\b)", "Vietnam"),
+    (r"(?:\bIndonesian\b|\bIndonesia\b)", "Indonesia"),
+    (r"(?:\bMalaysian\b|\bMalaysia\b)", "Malaysia"),
+    (r"(?:\bSingaporean\b|\bSingapore\b)", "Singapore"),
+    (r"(?:\bFilipino\b|\bPhilippines\b)", "Philippines"),
+    (r"(?:\bNew Zealand(?:er)?\b)", "New Zealand"),
+    (r"(?:\bBrazilian\b|\bBrazil\b)", "Brazil"),
+    (r"(?:\bMexican\b|\bMexico\b)", "Mexico"),
+)
 
 
 def emit(payload, exit_code=0):
@@ -370,11 +398,50 @@ def clean_value(value):
 def extract_email(value):
     if not value:
         return None
-    compact = re.sub(r"\s+", "", value)
+    normalized = value.replace("＠", "@").replace("．", ".")
+    normalized = re.sub(r"\s*@\s*", "@", normalized)
+    normalized = re.sub(r"\s*\.\s*", ".", normalized)
     match = re.search(
-        r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}", compact, re.I
+        r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\."
+        r"(?:co\.jp|ne\.jp|or\.jp|com|net|org|info|biz|jp|au|uk|fr|de|"
+        r"it|es|nl|ch|at|in|th|vn|id|my|sg|ph|nz|br|mx)",
+        normalized,
+        re.I,
     )
-    return clean_value(match.group(0)) if match else None
+    if not match:
+        return None
+    candidate = match.group(0)
+    local_part, domain_part = candidate.split("@", 1)
+    lowered = local_part.lower()
+    for marker in ("passportnumber", "emailaddress", "nationality"):
+        marker_index = lowered.rfind(marker)
+        if marker_index >= 0:
+            local_part = local_part[marker_index + len(marker) :]
+            lowered = local_part.lower()
+    if not local_part:
+        return None
+    return clean_value(f"{local_part}@{domain_part}")
+
+
+def extract_country(value, allow_free_text=False):
+    if not value:
+        return None
+    for pattern, country in COUNTRY_ALIASES:
+        if re.search(pattern, value, re.I):
+            return country
+    if not allow_free_text:
+        return None
+    cleaned = re.sub(
+        r"(?:国籍|外国人の場合|nationality|passport\s*number)",
+        " ",
+        value,
+        flags=re.I,
+    )
+    cleaned = re.sub(r"[\d|_:：]+", " ", cleaned)
+    cleaned = clean_value(cleaned)
+    if cleaned and 2 <= len(cleaned) <= 40:
+        return cleaned
+    return None
 
 
 def extract_phone(value):
@@ -428,6 +495,12 @@ def clean_address(value):
     address = re.sub(
         r"0(?:50|70|80|90)(?:[\s()\-]*\d){8}", " ", address
     )
+    address = re.sub(
+        r"\bTEL\b\s*[:：]?\s*(?:\+?\d[\d\s().\-]{6,}\d)",
+        " ",
+        address,
+        flags=re.I,
+    )
     address = re.sub(r"\bTEL\b", " ", address, flags=re.I)
     address = re.sub(r"(?:住所|address)", " ", address, flags=re.I)
 
@@ -467,6 +540,7 @@ def general_suggestions(text):
         "phone": extract_phone(text),
         "postalCode": extract_postal(text),
         "address": None,
+        "country": extract_country(text),
     }
 
 
@@ -629,6 +703,7 @@ def cloud_suggestions(text, words, form_detected):
     full_name = cloud_field_text(words, FIELD_BOUNDS["fullName"])
     address = cloud_field_text(words, FIELD_BOUNDS["address"])
     phone_text = cloud_field_text(words, FIELD_BOUNDS["phone"])
+    country_text = cloud_field_text(words, FIELD_BOUNDS["country"])
     email_text = cloud_field_text(words, FIELD_BOUNDS["email"])
     if full_name:
         values["fullName"] = full_name
@@ -641,6 +716,9 @@ def cloud_suggestions(text, words, form_detected):
     field_email = extract_email(email_text)
     if field_email:
         values["email"] = field_email
+    field_country = extract_country(country_text, allow_free_text=True)
+    if field_country:
+        values["country"] = field_country
     return values
 
 
@@ -678,6 +756,10 @@ def process_page(
             "language": "eng",
             "whitelist": "0123456789-+() ",
         },
+        "country": {
+            "bounds": FIELD_BOUNDS["country"],
+            "language": language,
+        },
         "email": {
             "bounds": FIELD_BOUNDS["email"],
             "language": "eng",
@@ -713,6 +795,11 @@ def process_page(
     field_email = extract_email(readings["email"])
     if field_email:
         values["email"] = field_email
+    field_country = extract_country(
+        readings["country"], allow_free_text=True
+    )
+    if field_country:
+        values["country"] = field_country
     return full_text, values, True
 
 
@@ -738,6 +825,57 @@ def pdf_images(input_path, cv2, np):
     return images
 
 
+def export_page_attachments(input_path, images, output_directory, cv2):
+    if not output_directory:
+        return [None for _ in images]
+
+    output_path = Path(output_directory)
+    output_path.mkdir(parents=True, exist_ok=True)
+    if input_path.suffix.lower() != ".pdf":
+        return [
+            {
+                "attachmentPath": str(input_path.resolve()),
+                "attachmentFileName": input_path.name,
+                "attachmentMimeType": mime_type_for(input_path.suffix),
+            }
+        ]
+
+    safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", input_path.stem).strip("_")
+    if not safe_stem:
+        safe_stem = "checkin_card"
+    attachments = []
+    for page_index, image in enumerate(images):
+        file_name = f"{safe_stem}_page_{page_index + 1}.png"
+        page_path = output_path / file_name
+        encoded_ok, encoded = cv2.imencode(".png", image)
+        if not encoded_ok:
+            raise RuntimeError(
+                f"Page {page_index + 1} could not be prepared for attachment."
+            )
+        page_path.write_bytes(encoded.tobytes())
+        attachments.append(
+            {
+                "attachmentPath": str(page_path.resolve()),
+                "attachmentFileName": file_name,
+                "attachmentMimeType": "image/png",
+            }
+        )
+    return attachments
+
+
+def mime_type_for(extension):
+    value = extension.lower().lstrip(".")
+    if value == "pdf":
+        return "application/pdf"
+    if value == "png":
+        return "image/png"
+    if value == "bmp":
+        return "image/bmp"
+    if value in ("tif", "tiff"):
+        return "image/tiff"
+    return "image/jpeg"
+
+
 def combine_suggestions(page_values):
     combined = {
         "fullName": None,
@@ -745,6 +883,7 @@ def combine_suggestions(page_values):
         "phone": None,
         "postalCode": None,
         "address": None,
+        "country": None,
     }
     for values in page_values:
         for key in combined:
@@ -759,6 +898,7 @@ def main():
     parser.add_argument(
         "--engine", choices=("local", "cloud"), default="local"
     )
+    parser.add_argument("--page-output-dir")
     args = parser.parse_args()
     input_path = Path(args.input)
     if not input_path.is_file():
@@ -787,6 +927,9 @@ def main():
             images = pdf_images(input_path, cv2, np)
         else:
             images = [read_image(input_path, cv2, np)]
+        page_attachments = export_page_attachments(
+            input_path, images, args.page_output_dir, cv2
+        )
 
         page_texts = []
         page_values = []
@@ -804,14 +947,16 @@ def main():
             )
             page_texts.append(text)
             page_values.append(values)
-            page_results.append(
-                {
-                    "pageNumber": page_index + 1,
-                    "text": text,
-                    "suggestions": values,
-                    "formDetected": form_detected,
-                }
-            )
+            page_result = {
+                "pageNumber": page_index + 1,
+                "text": text,
+                "suggestions": values,
+                "formDetected": form_detected,
+            }
+            attachment = page_attachments[page_index]
+            if attachment:
+                page_result.update(attachment)
+            page_results.append(page_result)
             if form_detected:
                 detected_pages += 1
     except Exception as error:

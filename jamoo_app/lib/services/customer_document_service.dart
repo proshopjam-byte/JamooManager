@@ -10,13 +10,28 @@ import '../models/customer.dart';
 import '../repositories/customer_repository.dart';
 
 class CustomerDocumentService {
-  const CustomerDocumentService({
-    this.repository = const CustomerRepository(),
-  });
+  const CustomerDocumentService({this.repository = const CustomerRepository()});
 
   final CustomerRepository repository;
 
   Future<CustomerDocument?> pickAndAttach(int customerId) async {
+    final selected = await pickCustomerCardFile(
+      dialogTitle: '顧客の宿帳・チェックインカードを選択',
+    );
+    if (selected == null) {
+      return null;
+    }
+    return _storeDocument(
+      customerId: customerId,
+      sourcePath: selected.path,
+      originalFileName: selected.originalFileName,
+      mimeType: selected.mimeType,
+    );
+  }
+
+  Future<CustomerCardImportFile?> pickCustomerCardFile({
+    String dialogTitle = '顧客登録する宿帳・チェックインカードを選択',
+  }) async {
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: const [
@@ -29,7 +44,7 @@ class CustomerDocumentService {
         'tiff',
       ],
       allowMultiple: false,
-      dialogTitle: '顧客の宿帳・チェックインカードを選択',
+      dialogTitle: dialogTitle,
     );
     if (result == null || result.files.isEmpty) {
       return null;
@@ -44,6 +59,95 @@ class CustomerDocumentService {
     if (!await source.exists()) {
       throw CustomerDocumentException('選択したファイルが見つかりません。\n$sourcePath');
     }
+    return CustomerCardImportFile(
+      path: sourcePath,
+      originalFileName: selected.name,
+      mimeType: _mimeTypeFor(selected.extension ?? p.extension(selected.name)),
+    );
+  }
+
+  Future<CustomerCardImportBatch> runCardImportOcr(
+    CustomerCardImportFile selected, {
+    bool useCloud = true,
+  }) async {
+    final temporaryDirectory = await Directory.systemTemp.createTemp(
+      'jamoo_card_import_',
+    );
+    try {
+      final script = await _prepareOcrScript();
+      final process = await _runPython(
+        script,
+        selected.path,
+        useCloud: useCloud,
+        pageOutputDirectory: temporaryDirectory.path,
+      );
+      return CustomerCardImportBatch(
+        source: selected,
+        result: _decodeOcrResult(process),
+        temporaryDirectory: temporaryDirectory,
+      );
+    } catch (error) {
+      if (await temporaryDirectory.exists()) {
+        await temporaryDirectory.delete(recursive: true);
+      }
+      if (error is CustomerDocumentException) {
+        rethrow;
+      }
+      throw CustomerDocumentException(error.toString());
+    }
+  }
+
+  Future<CustomerDocument> attachImportedPage({
+    required int customerId,
+    required CustomerCardImportFile source,
+    required CustomerOcrPageResult page,
+  }) async {
+    final sourcePath = page.attachmentPath ?? source.path;
+    final originalFileName = page.attachmentFileName ?? source.originalFileName;
+    final mimeType = page.attachmentMimeType ?? source.mimeType;
+    final document = await _storeDocument(
+      customerId: customerId,
+      sourcePath: sourcePath,
+      originalFileName: originalFileName,
+      mimeType: mimeType,
+    );
+    await repository.updateDocumentOcr(
+      documentId: document.id,
+      status: 'completed',
+      ocrText: page.rawText,
+    );
+    return document;
+  }
+
+  Future<void> openImportedPage({
+    required CustomerCardImportFile source,
+    required CustomerOcrPageResult page,
+  }) async {
+    final path = page.attachmentPath ?? source.path;
+    final file = File(path);
+    if (!await file.exists()) {
+      throw const CustomerDocumentException('確認用のカード画像が見つかりません。');
+    }
+    await Process.start('explorer.exe', [path]);
+  }
+
+  Future<void> cleanupCardImport(CustomerCardImportBatch batch) async {
+    final directory = batch.temporaryDirectory;
+    if (await directory.exists()) {
+      await directory.delete(recursive: true);
+    }
+  }
+
+  Future<CustomerDocument> _storeDocument({
+    required int customerId,
+    required String sourcePath,
+    required String originalFileName,
+    required String mimeType,
+  }) async {
+    final source = File(sourcePath);
+    if (!await source.exists()) {
+      throw CustomerDocumentException('添付するファイルが見つかりません。\n$sourcePath');
+    }
     final supportDirectory = await getApplicationSupportDirectory();
     final destinationDirectory = Directory(
       p.join(
@@ -54,7 +158,7 @@ class CustomerDocumentService {
       ),
     );
     await destinationDirectory.create(recursive: true);
-    final safeName = _safeFileName(selected.name);
+    final safeName = _safeFileName(originalFileName);
     final storedName = '${DateTime.now().microsecondsSinceEpoch}_$safeName';
     final destination = File(p.join(destinationDirectory.path, storedName));
     await source.copy(destination.path);
@@ -62,9 +166,9 @@ class CustomerDocumentService {
     try {
       return await repository.addCustomerDocument(
         customerId: customerId,
-        originalFileName: selected.name,
+        originalFileName: originalFileName,
         storedFilePath: destination.path,
-        mimeType: _mimeTypeFor(selected.extension ?? p.extension(selected.name)),
+        mimeType: mimeType,
       );
     } catch (_) {
       if (await destination.exists()) {
@@ -89,26 +193,7 @@ class CustomerDocumentService {
         document.storedFilePath,
         useCloud: useCloud,
       );
-      final output = process.stdout.toString().trim();
-      Map<String, dynamic>? decoded;
-      if (output.isNotEmpty) {
-        final value = jsonDecode(output);
-        if (value is Map<String, dynamic>) {
-          decoded = value;
-        }
-      }
-      if (process.exitCode != 0 || decoded == null || decoded['ok'] != true) {
-        final errorMessage = decoded?['error']?.toString().trim();
-        final stderr = process.stderr.toString().trim();
-        throw CustomerDocumentException(
-          errorMessage?.isNotEmpty == true
-              ? errorMessage!
-              : stderr.isNotEmpty
-              ? stderr
-              : 'OCRを実行できませんでした。',
-        );
-      }
-      final result = CustomerOcrResult.fromJson(decoded);
+      final result = _decodeOcrResult(process);
       await repository.updateDocumentOcr(
         documentId: document.id,
         status: 'completed',
@@ -191,6 +276,7 @@ class CustomerDocumentService {
     File script,
     String inputPath, {
     required bool useCloud,
+    String? pageOutputDirectory,
   }) async {
     final arguments = [
       script.path,
@@ -199,6 +285,9 @@ class CustomerDocumentService {
       '--engine',
       useCloud ? 'cloud' : 'local',
     ];
+    if (pageOutputDirectory != null) {
+      arguments.addAll(['--page-output-dir', pageOutputDirectory]);
+    }
     try {
       return await Process.run(
         'py',
@@ -242,6 +331,57 @@ class CustomerDocumentService {
         return 'image/jpeg';
     }
   }
+
+  static CustomerOcrResult _decodeOcrResult(ProcessResult process) {
+    final output = process.stdout.toString().trim();
+    Map<String, dynamic>? decoded;
+    if (output.isNotEmpty) {
+      try {
+        final value = jsonDecode(output);
+        if (value is Map<String, dynamic>) {
+          decoded = value;
+        }
+      } on FormatException {
+        decoded = null;
+      }
+    }
+    if (process.exitCode != 0 || decoded == null || decoded['ok'] != true) {
+      final errorMessage = decoded?['error']?.toString().trim();
+      final stderr = process.stderr.toString().trim();
+      throw CustomerDocumentException(
+        errorMessage?.isNotEmpty == true
+            ? errorMessage!
+            : stderr.isNotEmpty
+            ? stderr
+            : 'OCRを実行できませんでした。',
+      );
+    }
+    return CustomerOcrResult.fromJson(decoded);
+  }
+}
+
+class CustomerCardImportFile {
+  const CustomerCardImportFile({
+    required this.path,
+    required this.originalFileName,
+    required this.mimeType,
+  });
+
+  final String path;
+  final String originalFileName;
+  final String mimeType;
+}
+
+class CustomerCardImportBatch {
+  const CustomerCardImportBatch({
+    required this.source,
+    required this.result,
+    required this.temporaryDirectory,
+  });
+
+  final CustomerCardImportFile source;
+  final CustomerOcrResult result;
+  final Directory temporaryDirectory;
 }
 
 class CustomerDocumentException implements Exception {

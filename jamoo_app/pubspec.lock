@@ -97,6 +97,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.0.7"
+  csv_plus:
+    dependency: transitive
+    description:
+      name: csv_plus
+      sha256: "5c5029d9758b2b964331d0f8cfcb4eedb64dc381cb04d8eb09dd15a6fbadb864"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.2.0"
   cupertino_icons:
     dependency: "direct main"
     description:
@@ -113,6 +121,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.7.13"
+  excel_plus:
+    dependency: "direct main"
+    description:
+      name: excel_plus
+      sha256: "975f2c3bcbef5c535e54339d04ab6174b9e868dc8a675a57191380a38ef6af6f"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.14.2"
   fake_async:
     dependency: transitive
     description:

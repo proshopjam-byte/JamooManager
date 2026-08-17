@@ -10,7 +10,7 @@ class DatabaseService {
   static final DatabaseService instance = DatabaseService._();
 
   static const String databaseFileName = 'jamoo_manager.db';
-  static const int databaseVersion = 3;
+  static const int databaseVersion = 4;
 
   Database? _database;
 
@@ -112,6 +112,7 @@ class DatabaseService {
           phone TEXT,
           postal_code TEXT,
           address TEXT,
+          country TEXT,
           first_stay_date TEXT,
           last_stay_date TEXT,
           stay_count INTEGER NOT NULL DEFAULT 0,
@@ -214,6 +215,17 @@ class DatabaseService {
     if (oldVersion < 3) {
       await _createCustomerDocumentsTable(db);
     }
+    if (oldVersion < 4) {
+      await _addCustomerCountryColumn(db);
+    }
+  }
+
+  static Future<void> _addCustomerCountryColumn(DatabaseExecutor db) async {
+    final columns = await db.rawQuery('PRAGMA table_info(customers)');
+    final hasCountry = columns.any((row) => row['name'] == 'country');
+    if (!hasCountry) {
+      await db.execute('ALTER TABLE customers ADD COLUMN country TEXT');
+    }
   }
 
   static Future<void> _createMealOverridesTable(DatabaseExecutor db) async {
@@ -230,9 +242,7 @@ class DatabaseService {
     ''');
   }
 
-  static Future<void> _createCustomerDocumentsTable(
-    DatabaseExecutor db,
-  ) async {
+  static Future<void> _createCustomerDocumentsTable(DatabaseExecutor db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS customer_documents (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
