@@ -6,6 +6,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../models/checkin_sheet.dart';
+import '../models/facility_settings.dart';
 
 class CheckinSheetPrintService {
   const CheckinSheetPrintService();
@@ -14,6 +15,7 @@ class CheckinSheetPrintService {
     BuildContext context, {
     required DateTime date,
     required List<CheckinSheetRow> rows,
+    required FacilitySettings facilitySettings,
   }) async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
@@ -21,15 +23,15 @@ class CheckinSheetPrintService {
           appBar: AppBar(title: Text('${_formatDate(date)} チェックインシート')),
           body: PdfPreview(
             initialPageFormat: PdfPageFormat.a4.landscape,
-            build: (_) => _buildPdf(date, rows),
+            build: (_) => _buildPdf(date, rows, facilitySettings),
             allowPrinting: false,
             allowSharing: false,
             canChangePageFormat: false,
             canChangeOrientation: false,
             actions: [
               IconButton(
-                tooltip: 'A4横PDFを開いて印刷',
-                onPressed: () => _print(date, rows),
+                tooltip: 'A4横で印刷',
+                onPressed: () => _print(date, rows, facilitySettings),
                 icon: const Icon(Icons.print_outlined),
               ),
             ],
@@ -39,21 +41,36 @@ class CheckinSheetPrintService {
     );
   }
 
-  Future<void> _print(DateTime date, List<CheckinSheetRow> rows) async {
-    final bytes = await _buildPdf(date, rows);
-    await Printing.sharePdf(
-      bytes: bytes,
-      filename: 'checkin_sheet_${_fileDate(date)}.pdf',
+  Future<void> _print(
+    DateTime date,
+    List<CheckinSheetRow> rows,
+    FacilitySettings facilitySettings,
+  ) async {
+    await Printing.layoutPdf(
+      name: 'checkin_sheet_${_fileDate(date)}.pdf',
+      format: PdfPageFormat.a4.landscape,
+      dynamicLayout: false,
+      usePrinterSettings: true,
+      forceCustomPrintPaper: false,
+      windowsModernDialog: true,
+      onLayout: (_) => _buildPdf(date, rows, facilitySettings),
     );
   }
 
-  Future<Uint8List> _buildPdf(DateTime date, List<CheckinSheetRow> rows) async {
+  Future<Uint8List> _buildPdf(
+    DateTime date,
+    List<CheckinSheetRow> rows,
+    FacilitySettings facilitySettings,
+  ) async {
     final document = pw.Document();
     final regular = await PdfGoogleFonts.notoSansJPRegular();
     final bold = await PdfGoogleFonts.notoSansJPBold();
     final sortedRows = List<CheckinSheetRow>.from(rows)
       ..sort((first, second) => first.roomNumber.compareTo(second.roomNumber));
     final displayedKeys = <String>{};
+    final rowHeight = sortedRows.isEmpty
+        ? 45.0
+        : (360 / sortedRows.length).clamp(25, 45).toDouble();
 
     document.addPage(
       pw.Page(
@@ -62,7 +79,10 @@ class CheckinSheetPrintService {
         theme: pw.ThemeData.withFont(base: regular, bold: bold),
         build: (_) {
           final totalGuests = sortedRows
-              .where((row) => row.room.isAvailable)
+              .where(
+                (row) =>
+                    facilitySettings.roomByNumber(row.roomNumber).isAvailable,
+              )
               .fold<int>(0, (sum, row) => sum + row.guestCount);
           final totalAmount = sortedRows.fold<int>(
             0,
@@ -113,7 +133,8 @@ class CheckinSheetPrintService {
                 },
                 children: [
                   _headerRow(),
-                  for (final row in sortedRows) _dataRow(row, displayedKeys),
+                  for (final row in sortedRows)
+                    _dataRow(row, displayedKeys, facilitySettings, rowHeight),
                 ],
               ),
               pw.SizedBox(height: 7),
@@ -137,7 +158,7 @@ class CheckinSheetPrintService {
                   ),
                   pw.Spacer(),
                   pw.Text(
-                    'Vegetarian House Jamoo',
+                    facilitySettings.facilityName,
                     style: const pw.TextStyle(fontSize: 8),
                   ),
                 ],
@@ -180,8 +201,15 @@ class CheckinSheetPrintService {
     );
   }
 
-  static pw.TableRow _dataRow(CheckinSheetRow row, Set<String> displayedKeys) {
-    final unavailable = !row.room.isAvailable;
+  static pw.TableRow _dataRow(
+    CheckinSheetRow row,
+    Set<String> displayedKeys,
+    FacilitySettings facilitySettings,
+    double rowHeight,
+  ) {
+    final unavailable = !facilitySettings
+        .roomByNumber(row.roomNumber)
+        .isAvailable;
     var guestName = row.guestName;
     final key = row.reservationKey;
     if (key != null && displayedKeys.contains(key)) {
@@ -198,10 +226,16 @@ class CheckinSheetPrintService {
         color: unavailable ? PdfColors.grey200 : PdfColors.white,
       ),
       children: [
-        _cell('${row.roomNumber}', bold: true, alignment: pw.Alignment.center),
-        _cell(guestName, fontSize: 8.2),
+        _cell(
+          '${row.roomNumber}',
+          height: rowHeight,
+          bold: true,
+          alignment: pw.Alignment.center,
+        ),
+        _cell(guestName, height: rowHeight, fontSize: 8.2),
         _cell(
           unavailable || !row.hasReservation ? '' : '${row.guestCount}',
+          height: rowHeight,
           fontSize: 9,
           alignment: pw.Alignment.center,
         ),
@@ -211,27 +245,34 @@ class CheckinSheetPrintService {
               : row.checkedIn
               ? '■'
               : '□',
+          height: rowHeight,
           alignment: pw.Alignment.center,
         ),
         _cell(
           unavailable || row.amountYen == null
               ? ''
               : _formatNumber(row.amountYen!),
+          height: rowHeight,
           alignment: pw.Alignment.centerRight,
         ),
-        _cell(row.payment, alignment: pw.Alignment.center),
-        _cell(row.dinnerAndTable, fontSize: 7.5),
-        _cell(row.bathTime, alignment: pw.Alignment.center),
-        _cell(row.breakfastTime, alignment: pw.Alignment.center),
+        _cell(row.payment, height: rowHeight, alignment: pw.Alignment.center),
+        _cell(row.dinnerAndTable, height: rowHeight, fontSize: 7.5),
+        _cell(row.bathTime, height: rowHeight, alignment: pw.Alignment.center),
+        _cell(
+          row.breakfastTime,
+          height: rowHeight,
+          alignment: pw.Alignment.center,
+        ),
         _cell(
           unavailable || !row.hasReservation
               ? ''
               : row.checkedOut
               ? '■'
               : '□',
+          height: rowHeight,
           alignment: pw.Alignment.center,
         ),
-        _cell(row.notes, fontSize: 7.2),
+        _cell(row.notes, height: rowHeight, fontSize: 7.2),
       ],
     );
   }

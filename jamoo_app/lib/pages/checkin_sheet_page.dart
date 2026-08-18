@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../models/checkin_sheet.dart';
+import '../models/facility_settings.dart';
 import '../models/reservation.dart';
+import '../pages/facility_settings_page.dart';
 import '../repositories/checkin_sheet_repository.dart';
 import '../repositories/database_reservation_repository.dart';
+import '../repositories/facility_settings_repository.dart';
 import '../services/checkin_sheet_print_service.dart';
 import '../services/room_assignment_service.dart';
 
@@ -19,16 +22,19 @@ class CheckinSheetPage extends StatefulWidget {
 class _CheckinSheetPageState extends State<CheckinSheetPage> {
   static const _sheetRepository = CheckinSheetRepository();
   static const _reservationRepository = DatabaseReservationRepository();
+  static const _facilitySettingsRepository = FacilitySettingsRepository();
   static const _printService = CheckinSheetPrintService();
 
   final ScrollController _horizontalController = ScrollController();
   final ScrollController _verticalController = ScrollController();
-  late final RoomAssignmentService _assignmentService;
 
   List<Reservation> _reservations = const [];
   List<CheckinSheetRow> _rows = const [];
-  List<CheckinSheetRow> _previousRows = const [];
   List<String> _warnings = const [];
+  FacilitySettings _facilitySettings = FacilitySettings.defaults;
+  late RoomAssignmentService _assignmentService = RoomAssignmentService(
+    rooms: FacilitySettings.defaults.rooms,
+  );
   bool _loading = true;
   bool _saving = false;
   bool _dirty = false;
@@ -38,7 +44,6 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
   @override
   void initState() {
     super.initState();
-    _assignmentService = RoomAssignmentService(sheetDate: widget.date);
     _load();
   }
 
@@ -55,30 +60,32 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
       _error = null;
     });
     try {
-      final reservations = await _reservationRepository
-          .loadReservationsOverlapping(widget.date, widget.date);
-      final savedRows = await _sheetRepository.load(widget.date);
-      final previousRows = await _sheetRepository.load(
-        widget.date.subtract(const Duration(days: 1)),
+      final facilitySettings = await _facilitySettingsRepository.load();
+      final assignmentService = RoomAssignmentService(
+        rooms: facilitySettings.rooms,
+      );
+      final data = await _reservationRepository.loadCheckInsForDate(
+        widget.date,
+      );
+      final savedRows = await _sheetRepository.load(
+        widget.date,
+        rooms: facilitySettings.rooms,
       );
       final hasSavedAssignment = savedRows.any((row) => row.hasReservation);
       final result = hasSavedAssignment
-          ? _assignmentService.reconcile(
-              savedRows,
-              reservations,
-              previousRows: previousRows,
-            )
-          : _assignmentService.create(reservations, previousRows: previousRows);
+          ? assignmentService.reconcile(savedRows, data.reservations)
+          : assignmentService.create(data.reservations);
 
       if (!mounted) {
         return;
       }
       setState(() {
-        _reservations = reservations;
+        _facilitySettings = facilitySettings;
+        _assignmentService = assignmentService;
+        _reservations = data.reservations;
         _rows = result.rows;
-        _previousRows = previousRows;
         _warnings = result.warnings;
-        _dirty = !hasSavedAssignment && reservations.isNotEmpty;
+        _dirty = !hasSavedAssignment && data.reservations.isNotEmpty;
         _loading = false;
         _editorGeneration++;
       });
@@ -155,10 +162,7 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
     if (confirmed != true || !mounted) {
       return;
     }
-    final result = _assignmentService.create(
-      _reservations,
-      previousRows: _previousRows,
-    );
+    final result = _assignmentService.create(_reservations);
     setState(() {
       _rows = result.rows;
       _warnings = result.warnings;
@@ -173,7 +177,12 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
       return;
     }
     try {
-      await _printService.preview(context, date: widget.date, rows: _rows);
+      await _printService.preview(
+        context,
+        date: widget.date,
+        rows: _rows,
+        facilitySettings: _facilitySettings,
+      );
     } catch (error) {
       if (!mounted) {
         return;
@@ -181,6 +190,32 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('PDFを作成できませんでした: $error')));
+    }
+  }
+
+  Future<void> _openFacilitySettings() async {
+    if (_dirty) {
+      final saved = await _save(showMessage: false);
+      if (!saved || !mounted) {
+        return;
+      }
+    }
+
+    final updated = await Navigator.of(context).push<FacilitySettings>(
+      MaterialPageRoute(
+        builder: (context) =>
+            FacilitySettingsPage(initialSettings: _facilitySettings),
+      ),
+    );
+    if (!mounted || updated == null) {
+      return;
+    }
+
+    await _load();
+    if (mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('施設・客室設定を反映しました。')));
     }
   }
 
@@ -208,7 +243,7 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
         .fold<int>(0, (sum, entry) => sum + entry.value.guestCount);
     final remaining =
         RoomAssignmentService.guestCount(reservation) - assignedElsewhere;
-    final room = _rows[index].room;
+    final room = _facilitySettings.roomByNumber(_rows[index].roomNumber);
     final count = remaining <= 0
         ? 1
         : remaining > room.capacity
@@ -271,6 +306,11 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
             icon: const Icon(Icons.print_outlined),
           ),
           IconButton(
+            tooltip: '施設・客室設定',
+            onPressed: _loading || _saving ? null : _openFacilitySettings,
+            icon: const Icon(Icons.settings_outlined),
+          ),
+          IconButton(
             tooltip: '再読込',
             onPressed: _loading || _saving ? null : _load,
             icon: const Icon(Icons.refresh),
@@ -322,9 +362,7 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
               const SizedBox(width: 10),
               _SummaryCard(label: '精算合計', value: _formatYen(totalAmount)),
               const SizedBox(width: 16),
-              const Expanded(
-                child: Text('通常はツイン2名・ロフト4名。お子様を含む最大定員はツイン3名・ロフト5名です。'),
-              ),
+              Expanded(child: Text(_facilitySettings.capacitySummary)),
             ],
           ),
         ),
@@ -392,7 +430,8 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
 
   DataRow _buildDataRow(int index) {
     final row = _rows[index];
-    final unavailable = !row.room.isAvailable;
+    final room = _facilitySettings.roomByNumber(row.roomNumber);
+    final unavailable = !room.isAvailable;
     final editable = !unavailable && row.hasReservation;
     final reservationKeys = _reservations
         .map(RoomAssignmentService.reservationKey)
@@ -400,9 +439,9 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
     final currentKey = reservationKeys.contains(row.reservationKey)
         ? row.reservationKey ?? ''
         : '';
-    final guestMaximum = row.guestCount > row.room.capacity
+    final guestMaximum = row.guestCount > room.capacity
         ? row.guestCount
-        : row.room.capacity;
+        : room.capacity;
 
     return DataRow(
       color: unavailable
@@ -422,7 +461,7 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
                   '${row.roomNumber}号室',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
-                Text(row.room.typeLabel, style: const TextStyle(fontSize: 11)),
+                Text(room.typeLabel, style: const TextStyle(fontSize: 11)),
               ],
             ),
           ),

@@ -4,7 +4,10 @@ import '../services/database_service.dart';
 class CheckinSheetRepository {
   const CheckinSheetRepository();
 
-  Future<List<CheckinSheetRow>> load(DateTime date) async {
+  Future<List<CheckinSheetRow>> load(
+    DateTime date, {
+    required List<GuestRoomSpec> rooms,
+  }) async {
     final db = await DatabaseService.instance.database;
     final rows = await db.query(
       'checkin_sheet_rows',
@@ -17,8 +20,10 @@ class CheckinSheetRepository {
       for (final row in rows) _readInt(row['room_number']): _fromRow(row),
     };
 
-    return GuestRoomSpec.rooms
-        .map((room) => stored[room.number] ?? CheckinSheetRow.empty(room.number))
+    return rooms
+        .map(
+          (room) => stored[room.number] ?? CheckinSheetRow.empty(room.number),
+        )
         .toList(growable: false);
   }
 

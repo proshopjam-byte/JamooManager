@@ -9,9 +9,13 @@ class RoomAssignmentResult {
 }
 
 class RoomAssignmentService {
-  const RoomAssignmentService({required this.sheetDate});
+  RoomAssignmentService({required List<GuestRoomSpec> rooms})
+    : rooms = List.unmodifiable(
+        List<GuestRoomSpec>.from(rooms)
+          ..sort((first, second) => first.number.compareTo(second.number)),
+      );
 
-  final DateTime sheetDate;
+  final List<GuestRoomSpec> rooms;
 
   CheckinSheetRow assignReservation({
     required int roomNumber,
@@ -27,71 +31,17 @@ class RoomAssignmentService {
     );
   }
 
-  RoomAssignmentResult create(
-    List<Reservation> reservations, {
-    List<CheckinSheetRow> previousRows = const [],
-  }) {
-    final rows = GuestRoomSpec.rooms
+  RoomAssignmentResult create(List<Reservation> reservations) {
+    final rows = rooms
         .map((room) => CheckinSheetRow.empty(room.number))
         .toList(growable: false);
-    _carryOver(rows, previousRows, reservations);
     return _assignMissing(rows, reservations);
-  }
-
-  void _carryOver(
-    List<CheckinSheetRow> rows,
-    List<CheckinSheetRow> previousRows,
-    List<Reservation> reservations,
-  ) {
-    final reservationByKey = {
-      for (final reservation in reservations)
-        reservationKey(reservation): reservation,
-    };
-    final detailKeys = rows
-        .where((row) => row.reservationKey != null)
-        .map((row) => row.reservationKey!)
-        .toSet();
-    for (final previous in previousRows) {
-      final key = previous.reservationKey;
-      if (key == null || previous.guestCount <= 0) {
-        continue;
-      }
-      final reservation = reservationByKey[key];
-      if (reservation == null || !_isStayover(reservation)) {
-        continue;
-      }
-      final index = rows.indexWhere(
-        (row) => row.roomNumber == previous.roomNumber,
-      );
-      if (index < 0 ||
-          rows[index].hasReservation ||
-          !GuestRoomSpec.byNumber(previous.roomNumber).isAvailable) {
-        continue;
-      }
-      final assigned = rows
-          .where((row) => row.reservationKey == key)
-          .fold<int>(0, (sum, row) => sum + row.guestCount);
-      final remaining = guestCount(reservation) - assigned;
-      if (remaining <= 0) {
-        continue;
-      }
-      final count = previous.guestCount > remaining
-          ? remaining
-          : previous.guestCount;
-      rows[index] = _rowForReservation(
-        roomNumber: previous.roomNumber,
-        reservation: reservation,
-        guestCount: count,
-        includeBookingDetails: detailKeys.add(key),
-      );
-    }
   }
 
   RoomAssignmentResult reconcile(
     List<CheckinSheetRow> savedRows,
-    List<Reservation> reservations, {
-    List<CheckinSheetRow> previousRows = const [],
-  }) {
+    List<Reservation> reservations,
+  ) {
     final activeKeys = reservations.map(reservationKey).toSet();
     final byRoom = <int, CheckinSheetRow>{
       for (final row in savedRows)
@@ -100,12 +50,11 @@ class RoomAssignmentService {
             ? row
             : CheckinSheetRow.empty(row.roomNumber),
     };
-    final rows = GuestRoomSpec.rooms
+    final rows = rooms
         .map(
           (room) => byRoom[room.number] ?? CheckinSheetRow.empty(room.number),
         )
         .toList(growable: false);
-    _carryOver(rows, previousRows, reservations);
     return _assignMissing(rows, reservations);
   }
 
@@ -120,11 +69,16 @@ class RoomAssignmentService {
     };
 
     for (final row in rows) {
-      if (!row.room.isAvailable && row.hasReservation) {
+      final room = _roomByNumber(row.roomNumber);
+      if (room == null) {
+        warnings.add('${row.roomNumber}号室は施設設定にありません。');
+        continue;
+      }
+      if (!room.isAvailable && row.hasReservation) {
         warnings.add('${row.roomNumber}号室は使用不可です。');
       }
-      if (row.guestCount > row.room.capacity && row.room.isAvailable) {
-        warnings.add('${row.roomNumber}号室は定員${row.room.capacity}名を超えています。');
+      if (row.guestCount > room.capacity && room.isAvailable) {
+        warnings.add('${row.roomNumber}号室は定員${room.capacity}名を超えています。');
       }
     }
 
@@ -183,8 +137,8 @@ class RoomAssignmentService {
           if (index < 0 || rows[index].hasReservation) {
             continue;
           }
-          final room = GuestRoomSpec.byNumber(planned.roomNumber);
-          if (!room.isAvailable) {
+          final room = _roomByNumber(planned.roomNumber);
+          if (room == null || !room.isAvailable) {
             continue;
           }
           final count = planned.guestCount > remainingGuests
@@ -212,13 +166,12 @@ class RoomAssignmentService {
         if (index < 0 || rows[index].hasReservation) {
           continue;
         }
-        final room = GuestRoomSpec.byNumber(roomNumber);
-        if (!room.isAvailable) {
+        final room = _roomByNumber(roomNumber);
+        if (room == null || !room.isAvailable) {
           continue;
         }
-        final automaticCapacity = room.isLoft ? 4 : 2;
-        final count = remainingGuests > automaticCapacity
-            ? automaticCapacity
+        final count = remainingGuests > room.normalCapacity
+            ? room.normalCapacity
             : remainingGuests;
         rows[index] = _rowForReservation(
           roomNumber: roomNumber,
@@ -241,72 +194,43 @@ class RoomAssignmentService {
     return RoomAssignmentResult(rows: rows, warnings: _unique(warnings));
   }
 
-  CheckinSheetRow _rowForReservation({
-    required int roomNumber,
-    required Reservation reservation,
-    required int guestCount,
-    required bool includeBookingDetails,
-  }) {
-    final stayover = _isStayover(reservation);
-    return CheckinSheetRow(
-      roomNumber: roomNumber,
-      reservationKey: reservationKey(reservation),
-      reservationSource: reservation.source,
-      reservationNumber: reservation.reservationNumber ?? reservation.id,
-      guestName: reservation.displayGuestName,
-      guestCount: guestCount,
-      checkedIn: stayover,
-      amountYen: includeBookingDetails && !stayover
-          ? reservation.priceYen
-          : null,
-      payment: includeBookingDetails && !stayover
-          ? _defaultPayment(reservation)
-          : '',
-      dinnerAndTable: reservation.hasDinner == true ? 'あり' : '',
-      bathTime: '',
-      breakfastTime: '',
-      checkedOut: false,
-      notes: includeBookingDetails ? _notesFor(reservation, stayover) : '',
-    );
-  }
+  List<int> _candidateRoomNumbers(Reservation reservation) {
+    final available = rooms.where((room) => room.isAvailable).toList();
+    final lofts = available.where((room) => room.isLoft).toList();
+    final standard = available
+        .where((room) => room.type == GuestRoomType.standardTwin)
+        .toList();
+    final other = available
+        .where(
+          (room) => !room.isLoft && room.type != GuestRoomType.standardTwin,
+        )
+        .toList();
 
-  bool _isStayover(Reservation reservation) {
-    final checkIn = reservation.checkIn;
-    if (checkIn == null) {
-      return false;
+    if (!_prefersLoft(reservation) || lofts.isEmpty) {
+      return [
+        ...standard,
+        ...other,
+        ...lofts,
+      ].map((room) => room.number).toList(growable: false);
     }
-    final arrival = DateTime(checkIn.year, checkIn.month, checkIn.day);
-    final target = DateTime(sheetDate.year, sheetDate.month, sheetDate.day);
-    return target.isAfter(arrival);
-  }
 
-  String _notesFor(Reservation reservation, bool stayover) {
-    final original = reservation.specialRequests?.trim() ?? '';
-    if (!stayover || reservation.checkIn == null) {
-      return original;
+    final result = <int>[];
+    final remainingStandard = List<GuestRoomSpec>.from(standard);
+    for (final loft in lofts) {
+      result.add(loft.number);
+      if (remainingStandard.isNotEmpty) {
+        remainingStandard.sort(
+          (first, second) => _compareDistance(first, second, loft.number),
+        );
+        result.add(remainingStandard.removeAt(0).number);
+      }
     }
-    final arrival = DateTime(
-      reservation.checkIn!.year,
-      reservation.checkIn!.month,
-      reservation.checkIn!.day,
-    );
-    final target = DateTime(sheetDate.year, sheetDate.month, sheetDate.day);
-    final stayDay = target.difference(arrival).inDays + 1;
-    final nights = reservation.nights;
-    final label = nights != null && nights > 0
-        ? '連泊 $stayDay日目（全$nights泊）'
-        : '連泊 $stayDay日目';
-    return original.isEmpty ? label : '$label / $original';
+    result.addAll(remainingStandard.map((room) => room.number));
+    result.addAll(other.map((room) => room.number));
+    return result;
   }
 
-  static List<int> _candidateRoomNumbers(Reservation reservation) {
-    if (_prefersLoft(reservation)) {
-      return const [2, 3, 8, 7, 1, 4, 5];
-    }
-    return const [1, 3, 4, 5, 7, 2, 8];
-  }
-
-  static List<_PlannedRoom> _specifiedRoomPlan(Reservation reservation) {
+  List<_PlannedRoom> _specifiedRoomPlan(Reservation reservation) {
     final roomName = reservation.roomName?.trim() ?? '';
     if (roomName.isEmpty) {
       return const [];
@@ -348,7 +272,7 @@ class RoomAssignmentService {
       for (var index = 0; index < roomCount; index++) {
         requests.add(
           _RequestedRoom(
-            isLoft: isLoft,
+            type: isLoft ? GuestRoomType.loft : GuestRoomType.standardTwin,
             specifiedGuests: roomCount == 1 ? specifiedGuests : null,
           ),
         );
@@ -361,8 +285,8 @@ class RoomAssignmentService {
     final counts = List<int>.filled(requests.length, 0);
     var remaining = guestCount(reservation);
     if (requests.length == 1 && requests.first.specifiedGuests == null) {
-      final maximumCapacity = requests.first.isLoft ? 5 : 3;
-      final count = remaining > maximumCapacity ? maximumCapacity : remaining;
+      final maximum = _capacityFor(requests.first.type, maximum: true);
+      final count = remaining > maximum ? maximum : remaining;
       counts[0] = count;
       remaining -= count;
     }
@@ -371,7 +295,9 @@ class RoomAssignmentService {
       if (specified == null || remaining <= 0) {
         continue;
       }
-      final count = specified > remaining ? remaining : specified;
+      final maximum = _capacityFor(requests[index].type, maximum: true);
+      final limited = specified > maximum ? maximum : specified;
+      final count = limited > remaining ? remaining : limited;
       counts[index] = count;
       remaining -= count;
     }
@@ -382,17 +308,19 @@ class RoomAssignmentService {
             if (requests[index].specifiedGuests == null && counts[index] == 0)
               index,
         ]..sort((first, second) {
-          if (requests[first].isLoft == requests[second].isLoft) {
+          final firstLoft = requests[first].type == GuestRoomType.loft;
+          final secondLoft = requests[second].type == GuestRoomType.loft;
+          if (firstLoft == secondLoft) {
             return first.compareTo(second);
           }
-          return requests[first].isLoft ? 1 : -1;
+          return firstLoft ? 1 : -1;
         });
 
     for (var position = 0; position < unspecified.length; position++) {
       final index = unspecified[position];
       final roomsAfter = unspecified.length - position - 1;
       final available = remaining - roomsAfter;
-      final capacity = requests[index].isLoft ? 4 : 2;
+      final capacity = _capacityFor(requests[index].type);
       final count = available <= 0
           ? 0
           : available > capacity
@@ -402,21 +330,48 @@ class RoomAssignmentService {
       remaining -= count;
     }
 
-    final hasLoft = requests.any((request) => request.isLoft);
-    final loftNumbers = <int>[2, 8];
-    final twinNumbers = hasLoft ? <int>[3, 7, 1, 4, 5] : <int>[1, 3, 4, 5, 7];
-    var loftIndex = 0;
-    var twinIndex = 0;
+    final roomNumbers = List<int?>.filled(requests.length, null);
+    final unusedLofts = rooms
+        .where((room) => room.isAvailable && room.type == GuestRoomType.loft)
+        .toList();
+    final unusedStandard = rooms
+        .where(
+          (room) => room.isAvailable && room.type == GuestRoomType.standardTwin,
+        )
+        .toList();
+    final selectedLofts = <GuestRoomSpec>[];
+
+    for (var index = 0; index < requests.length; index++) {
+      if (requests[index].type != GuestRoomType.loft || unusedLofts.isEmpty) {
+        continue;
+      }
+      final room = unusedLofts.removeAt(0);
+      selectedLofts.add(room);
+      roomNumbers[index] = room.number;
+    }
+
+    var standardPosition = 0;
+    for (var index = 0; index < requests.length; index++) {
+      if (requests[index].type != GuestRoomType.standardTwin ||
+          unusedStandard.isEmpty) {
+        continue;
+      }
+      if (selectedLofts.isNotEmpty) {
+        final anchor =
+            selectedLofts[standardPosition
+                .clamp(0, selectedLofts.length - 1)
+                .toInt()];
+        unusedStandard.sort(
+          (first, second) => _compareDistance(first, second, anchor.number),
+        );
+      }
+      roomNumbers[index] = unusedStandard.removeAt(0).number;
+      standardPosition++;
+    }
+
     final plan = <_PlannedRoom>[];
     for (var index = 0; index < requests.length; index++) {
-      final request = requests[index];
-      final roomNumber = request.isLoft
-          ? loftIndex < loftNumbers.length
-                ? loftNumbers[loftIndex++]
-                : null
-          : twinIndex < twinNumbers.length
-          ? twinNumbers[twinIndex++]
-          : null;
+      final roomNumber = roomNumbers[index];
       if (roomNumber != null && counts[index] > 0) {
         plan.add(
           _PlannedRoom(roomNumber: roomNumber, guestCount: counts[index]),
@@ -424,21 +379,89 @@ class RoomAssignmentService {
       }
     }
 
-    const roomOrder = <int>[2, 3, 8, 7, 1, 4, 5];
-    plan.sort(
-      (first, second) => roomOrder
-          .indexOf(first.roomNumber)
-          .compareTo(roomOrder.indexOf(second.roomNumber)),
-    );
+    final roomOrder = _candidateRoomNumbers(reservation);
+    plan.sort((first, second) {
+      final firstIndex = roomOrder.indexOf(first.roomNumber);
+      final secondIndex = roomOrder.indexOf(second.roomNumber);
+      return firstIndex.compareTo(secondIndex);
+    });
     return plan;
   }
 
-  static bool _prefersLoft(Reservation reservation) {
+  int _capacityFor(GuestRoomType type, {bool maximum = false}) {
+    final matching = rooms.where(
+      (room) => room.isAvailable && room.type == type,
+    );
+    if (matching.isEmpty) {
+      return 1;
+    }
+    return matching
+        .map((room) => maximum ? room.capacity : room.normalCapacity)
+        .reduce((first, second) => first > second ? first : second);
+  }
+
+  bool _prefersLoft(Reservation reservation) {
     final roomName = reservation.roomName?.toLowerCase() ?? '';
-    return guestCount(reservation) >= 3 ||
+    final standardCapacities = rooms
+        .where(
+          (room) => room.isAvailable && room.type == GuestRoomType.standardTwin,
+        )
+        .map((room) => room.normalCapacity);
+    final standardCapacity = standardCapacities.isEmpty
+        ? 2
+        : standardCapacities.reduce(
+            (first, second) => first > second ? first : second,
+          );
+    return guestCount(reservation) > standardCapacity ||
         roomName.contains('ロフト') ||
-        roomName.contains('loft') ||
-        roomName.contains('4名');
+        roomName.contains('loft');
+  }
+
+  GuestRoomSpec? _roomByNumber(int roomNumber) {
+    for (final room in rooms) {
+      if (room.number == roomNumber) {
+        return room;
+      }
+    }
+    return null;
+  }
+
+  static int _compareDistance(
+    GuestRoomSpec first,
+    GuestRoomSpec second,
+    int anchor,
+  ) {
+    final firstDistance = (first.number - anchor).abs();
+    final secondDistance = (second.number - anchor).abs();
+    final distanceOrder = firstDistance.compareTo(secondDistance);
+    if (distanceOrder != 0) {
+      return distanceOrder;
+    }
+    return second.number.compareTo(first.number);
+  }
+
+  static CheckinSheetRow _rowForReservation({
+    required int roomNumber,
+    required Reservation reservation,
+    required int guestCount,
+    required bool includeBookingDetails,
+  }) {
+    return CheckinSheetRow(
+      roomNumber: roomNumber,
+      reservationKey: reservationKey(reservation),
+      reservationSource: reservation.source,
+      reservationNumber: reservation.reservationNumber ?? reservation.id,
+      guestName: reservation.displayGuestName,
+      guestCount: guestCount,
+      checkedIn: false,
+      amountYen: includeBookingDetails ? reservation.priceYen : null,
+      payment: includeBookingDetails ? _defaultPayment(reservation) : '',
+      dinnerAndTable: reservation.hasDinner == true ? 'あり' : '',
+      bathTime: '',
+      breakfastTime: '',
+      checkedOut: false,
+      notes: includeBookingDetails ? reservation.specialRequests ?? '' : '',
+    );
   }
 
   static String _defaultPayment(Reservation reservation) {
@@ -470,9 +493,9 @@ class RoomAssignmentService {
 }
 
 class _RequestedRoom {
-  const _RequestedRoom({required this.isLoft, this.specifiedGuests});
+  const _RequestedRoom({required this.type, this.specifiedGuests});
 
-  final bool isLoft;
+  final GuestRoomType type;
   final int? specifiedGuests;
 }
 

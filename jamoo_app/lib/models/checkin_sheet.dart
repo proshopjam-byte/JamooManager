@@ -1,17 +1,60 @@
+enum GuestRoomType {
+  standardTwin,
+  loft,
+  other;
+
+  String get label {
+    switch (this) {
+      case GuestRoomType.standardTwin:
+        return 'スタンダードツイン';
+      case GuestRoomType.loft:
+        return 'ロフト付き';
+      case GuestRoomType.other:
+        return 'その他';
+    }
+  }
+
+  static GuestRoomType fromName(String? value) {
+    return GuestRoomType.values.firstWhere(
+      (type) => type.name == value,
+      orElse: () => GuestRoomType.other,
+    );
+  }
+}
+
 class GuestRoomSpec {
   const GuestRoomSpec({
     required this.number,
     required this.label,
+    required this.normalCapacity,
     required this.capacity,
-    required this.isLoft,
+    required this.type,
     this.isAvailable = true,
   });
 
+  factory GuestRoomSpec.fromJson(Map<String, Object?> json) {
+    final capacity = _readInt(json['capacity'], fallback: 1);
+    final normalCapacity = _readInt(json['normalCapacity'], fallback: capacity);
+    return GuestRoomSpec(
+      number: _readInt(json['number'], fallback: 1),
+      label: json['label']?.toString().trim().isNotEmpty == true
+          ? json['label'].toString().trim()
+          : GuestRoomType.fromName(json['type']?.toString()).label,
+      normalCapacity: normalCapacity.clamp(1, capacity).toInt(),
+      capacity: capacity,
+      type: GuestRoomType.fromName(json['type']?.toString()),
+      isAvailable: json['isAvailable'] != false,
+    );
+  }
+
   final int number;
   final String label;
+  final int normalCapacity;
   final int capacity;
-  final bool isLoft;
+  final GuestRoomType type;
   final bool isAvailable;
+
+  bool get isLoft => type == GuestRoomType.loft;
 
   String get displayName => '$number号室';
 
@@ -19,28 +62,46 @@ class GuestRoomSpec {
     if (!isAvailable) {
       return '使用不可';
     }
-    return isLoft ? 'ロフト付き・$capacity名' : 'ツイン・$capacity名';
+    return '$label・$capacity名';
   }
 
-  static const rooms = <GuestRoomSpec>[
-    GuestRoomSpec(number: 1, label: 'スタンダードツイン', capacity: 3, isLoft: false),
-    GuestRoomSpec(number: 2, label: 'ロフト付き5名室', capacity: 5, isLoft: true),
-    GuestRoomSpec(number: 3, label: 'スタンダードツイン', capacity: 3, isLoft: false),
-    GuestRoomSpec(number: 4, label: 'スタンダードツイン', capacity: 3, isLoft: false),
-    GuestRoomSpec(number: 5, label: 'スタンダードツイン', capacity: 3, isLoft: false),
-    GuestRoomSpec(
-      number: 6,
-      label: '使用不可',
-      capacity: 0,
-      isLoft: false,
-      isAvailable: false,
-    ),
-    GuestRoomSpec(number: 7, label: 'スタンダードツイン', capacity: 3, isLoft: false),
-    GuestRoomSpec(number: 8, label: 'ロフト付き5名室', capacity: 5, isLoft: true),
-  ];
+  GuestRoomSpec copyWith({
+    int? number,
+    String? label,
+    int? normalCapacity,
+    int? capacity,
+    GuestRoomType? type,
+    bool? isAvailable,
+  }) {
+    return GuestRoomSpec(
+      number: number ?? this.number,
+      label: label ?? this.label,
+      normalCapacity: normalCapacity ?? this.normalCapacity,
+      capacity: capacity ?? this.capacity,
+      type: type ?? this.type,
+      isAvailable: isAvailable ?? this.isAvailable,
+    );
+  }
 
-  static GuestRoomSpec byNumber(int roomNumber) {
-    return rooms.firstWhere((room) => room.number == roomNumber);
+  Map<String, Object?> toJson() {
+    return {
+      'number': number,
+      'label': label,
+      'normalCapacity': normalCapacity,
+      'capacity': capacity,
+      'type': type.name,
+      'isAvailable': isAvailable,
+    };
+  }
+
+  static int _readInt(Object? value, {required int fallback}) {
+    if (value is int) {
+      return value;
+    }
+    if (value is num) {
+      return value.toInt();
+    }
+    return int.tryParse(value?.toString() ?? '') ?? fallback;
   }
 }
 
@@ -95,8 +156,6 @@ class CheckinSheetRow {
   final String breakfastTime;
   final bool checkedOut;
   final String notes;
-
-  GuestRoomSpec get room => GuestRoomSpec.byNumber(roomNumber);
 
   bool get hasReservation => reservationKey != null;
 
