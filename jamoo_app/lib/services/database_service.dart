@@ -10,7 +10,7 @@ class DatabaseService {
   static final DatabaseService instance = DatabaseService._();
 
   static const String databaseFileName = 'jamoo_manager.db';
-  static const int databaseVersion = 4;
+  static const int databaseVersion = 5;
 
   Database? _database;
 
@@ -205,6 +205,7 @@ class DatabaseService {
 
       await _createMealOverridesTable(txn);
       await _createCustomerDocumentsTable(txn);
+      await _createCheckinSheetRowsTable(txn);
     });
   }
 
@@ -217,6 +218,9 @@ class DatabaseService {
     }
     if (oldVersion < 4) {
       await _addCustomerCountryColumn(db);
+    }
+    if (oldVersion < 5) {
+      await _createCheckinSheetRowsTable(db);
     }
   }
 
@@ -263,6 +267,37 @@ class DatabaseService {
     await db.execute('''
       CREATE INDEX IF NOT EXISTS idx_customer_documents_customer_id
       ON customer_documents(customer_id)
+    ''');
+  }
+
+  static Future<void> _createCheckinSheetRowsTable(
+    DatabaseExecutor db,
+  ) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS checkin_sheet_rows (
+        sheet_date TEXT NOT NULL,
+        room_number INTEGER NOT NULL,
+        reservation_key TEXT,
+        reservation_source TEXT,
+        reservation_number TEXT,
+        guest_name TEXT NOT NULL DEFAULT '',
+        guest_count INTEGER NOT NULL DEFAULT 0,
+        checked_in INTEGER NOT NULL DEFAULT 0,
+        amount_yen INTEGER,
+        payment TEXT NOT NULL DEFAULT '',
+        dinner_and_table TEXT NOT NULL DEFAULT '',
+        bath_time TEXT NOT NULL DEFAULT '',
+        breakfast_time TEXT NOT NULL DEFAULT '',
+        checked_out INTEGER NOT NULL DEFAULT 0,
+        notes TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(sheet_date, room_number)
+      )
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_checkin_sheet_rows_date
+      ON checkin_sheet_rows(sheet_date)
     ''');
   }
 
