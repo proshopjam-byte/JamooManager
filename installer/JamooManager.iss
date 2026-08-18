@@ -1,8 +1,8 @@
-; JamooManager Windows Installer
-; Per-user installation for writable Booking.com data
+﻿; JamooManager Windows Installer
+; Version 1.2.0 - per-user installation and safe in-place upgrades
 
 #define MyAppName "JamooManager"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.2.0"
 #define MyAppPublisher "プロショップJAM"
 #define MyAppExeName "JamooManager.exe"
 
@@ -16,9 +16,11 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={localappdata}\Programs\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
+UsePreviousAppDir=yes
+UsePreviousTasks=yes
 
 OutputDir=..\dist\installer
-OutputBaseFilename=JamooManager_Setup_1.1.0
+OutputBaseFilename=JamooManager_Setup_{#MyAppVersion}
 SetupIconFile=..\jamoo_app\windows\runner\resources\app_icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
@@ -27,6 +29,7 @@ SolidCompression=yes
 WizardStyle=modern
 
 ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 
@@ -34,7 +37,7 @@ CloseApplications=yes
 RestartApplications=no
 SetupLogging=yes
 
-VersionInfoVersion=1.1.0.0
+VersionInfoVersion=1.2.0.0
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription=JamooManager Windows Installer
 VersionInfoProductName={#MyAppName}
@@ -45,7 +48,8 @@ VersionInfoCopyright=Copyright (C) 2026 Pro Shop JAM
 Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "デスクトップにショートカットを作成する"; GroupDescription: "追加アイコン:"; Flags: unchecked
+Name: "desktopicon"; Description: "デスクトップにショートカットを作成する"; GroupDescription: "追加アイコン:"; Flags: checkedonce
+Name: "initialsetup"; Description: "Booking.com・CHILLNNの初回セットアップを実行する"; GroupDescription: "初回設定:"; Flags: checkedonce
 
 [Files]
 Source: "..\dist\JamooManager\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -57,7 +61,7 @@ Name: "{autoprograms}\{#MyAppName}\初回セットアップ"; Filename: "{app}\�
 Name: "{autoprograms}\{#MyAppName}\はじめにお読みください"; Filename: "{app}\はじめにお読みください.txt"
 
 [Run]
-Filename: "{app}\初回セットアップ.cmd"; Description: "Booking.com・CHILLNNの初回セットアップを実行する"; WorkingDir: "{app}"; Flags: postinstall shellexec waituntilterminated skipifsilent
+Filename: "{app}\初回セットアップ.cmd"; Description: "Booking.com・CHILLNNの初回セットアップを実行する"; WorkingDir: "{app}"; Tasks: initialsetup; Flags: postinstall shellexec waituntilterminated skipifsilent
 Filename: "{app}\{#MyAppExeName}"; Description: "JamooManagerを起動する"; WorkingDir: "{app}"; Flags: postinstall nowait skipifsilent
 
 [UninstallDelete]
