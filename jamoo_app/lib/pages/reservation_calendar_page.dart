@@ -297,6 +297,18 @@ class _MonthCalendar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final monthlyCheckIns = reservations
+        .where(
+          (reservation) =>
+              _checksInDuringMonth(reservation, visibleMonth) &&
+              !_isCancelled(reservation),
+        )
+        .toList(growable: false);
+    final monthlySales = _salesTotal(monthlyCheckIns);
+    final monthlyUnsetPrices = monthlyCheckIns
+        .where((reservation) => reservation.priceYen == null)
+        .length;
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -319,6 +331,13 @@ class _MonthCalendar extends StatelessWidget {
                 const SizedBox(width: 14),
                 const _LegendDot(color: Color(0xFFEF6C00), label: '直接予約'),
               ],
+            ),
+            const SizedBox(height: 12),
+            _MonthlySalesSummary(
+              visibleMonth: visibleMonth,
+              amount: monthlySales,
+              reservationCount: monthlyCheckIns.length,
+              unsetPriceCount: monthlyUnsetPrices,
             ),
             const SizedBox(height: 14),
             const Row(
@@ -345,14 +364,31 @@ class _MonthCalendar extends StatelessWidget {
               itemCount: days.length,
               itemBuilder: (context, index) {
                 final date = days[index];
+                final inVisibleMonth =
+                    date.year == visibleMonth.year &&
+                    date.month == visibleMonth.month;
                 final dayReservations = reservations
                     .where((reservation) => _staysOn(reservation, date))
                     .toList(growable: false);
+                final dayCheckIns = inVisibleMonth
+                    ? reservations
+                          .where(
+                            (reservation) =>
+                                _checksInOn(reservation, date) &&
+                                !_isCancelled(reservation),
+                          )
+                          .toList(growable: false)
+                    : const <Reservation>[];
                 return _CalendarDay(
                   date: date,
-                  inVisibleMonth: date.month == visibleMonth.month,
+                  inVisibleMonth: inVisibleMonth,
                   selected: _sameDay(date, selectedDate),
                   reservations: dayReservations,
+                  checkInSales: _salesTotal(dayCheckIns),
+                  checkInCount: dayCheckIns.length,
+                  unsetPriceCount: dayCheckIns
+                      .where((reservation) => reservation.priceYen == null)
+                      .length,
                   onTap: () => onDateSelected(date),
                 );
               },
@@ -364,12 +400,85 @@ class _MonthCalendar extends StatelessWidget {
   }
 }
 
+class _MonthlySalesSummary extends StatelessWidget {
+  const _MonthlySalesSummary({
+    required this.visibleMonth,
+    required this.amount,
+    required this.reservationCount,
+    required this.unsetPriceCount,
+  });
+
+  final DateTime visibleMonth;
+  final int amount;
+  final int reservationCount;
+  final int unsetPriceCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: colorScheme.primaryContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.payments_outlined, color: colorScheme.onPrimaryContainer),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${visibleMonth.month}月の売上（チェックイン基準）',
+                  style: TextStyle(
+                    color: colorScheme.onPrimaryContainer,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '有効予約 $reservationCount件',
+                  style: TextStyle(color: colorScheme.onPrimaryContainer),
+                ),
+                if (unsetPriceCount > 0)
+                  Text(
+                    '※料金未設定 $unsetPriceCount件は合計に含まれません',
+                    style: TextStyle(
+                      color: colorScheme.error,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            _formatYen(amount),
+            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+              color: colorScheme.onPrimaryContainer,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _CalendarDay extends StatelessWidget {
   const _CalendarDay({
     required this.date,
     required this.inVisibleMonth,
     required this.selected,
     required this.reservations,
+    required this.checkInSales,
+    required this.checkInCount,
+    required this.unsetPriceCount,
     required this.onTap,
   });
 
@@ -377,6 +486,9 @@ class _CalendarDay extends StatelessWidget {
   final bool inVisibleMonth;
   final bool selected;
   final List<Reservation> reservations;
+  final int checkInSales;
+  final int checkInCount;
+  final int unsetPriceCount;
   final VoidCallback onTap;
 
   @override
@@ -422,14 +534,41 @@ class _CalendarDay extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              '${date.day}',
-              style: TextStyle(
-                fontWeight: selected ? FontWeight.bold : FontWeight.normal,
-                color: inVisibleMonth
-                    ? colorScheme.onSurface
-                    : colorScheme.onSurfaceVariant,
-              ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${date.day}',
+                  style: TextStyle(
+                    fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                    color: inVisibleMonth
+                        ? colorScheme.onSurface
+                        : colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                if (inVisibleMonth && checkInCount > 0) ...[
+                  const SizedBox(width: 3),
+                  Expanded(
+                    child: Tooltip(
+                      message: unsetPriceCount > 0
+                          ? 'チェックイン売上 ${_formatYen(checkInSales)}\n'
+                                '料金未設定 $unsetPriceCount件'
+                          : 'チェックイン売上 ${_formatYen(checkInSales)}',
+                      child: Text(
+                        '${_formatYen(checkInSales)}${unsetPriceCount > 0 ? '※' : ''}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.end,
+                        style: const TextStyle(
+                          color: Color(0xFF2E7D32),
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
             const Spacer(),
             if (chillnnCount > 0)
@@ -565,6 +704,17 @@ class _SelectedDateReservations extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final selectedCheckIns = allReservations
+        .where(
+          (reservation) =>
+              _checksInOn(reservation, selectedDate) &&
+              !_isCancelled(reservation),
+        )
+        .toList(growable: false);
+    final selectedDateSales = _salesTotal(selectedCheckIns);
+    final selectedDateUnsetPrices = selectedCheckIns
+        .where((reservation) => reservation.priceYen == null)
+        .length;
     final totalGuests = reservations.fold<int>(0, (sum, reservation) {
       final count =
           reservation.totalGuests ??
@@ -607,6 +757,28 @@ class _SelectedDateReservations extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text('${reservations.length}室・$totalGuests名'),
+            if (selectedCheckIns.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  const Icon(Icons.payments_outlined, size: 18),
+                  const SizedBox(width: 6),
+                  Text(
+                    'チェックイン売上 ${_formatYen(selectedDateSales)}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+              if (selectedDateUnsetPrices > 0)
+                Text(
+                  '※料金未設定 $selectedDateUnsetPrices件',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.error,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+            ],
             const SizedBox(height: 12),
             Container(
               width: double.infinity,
@@ -843,6 +1015,45 @@ bool _staysOn(Reservation reservation, DateTime date) {
   final start = DateTime(checkIn.year, checkIn.month, checkIn.day);
   final end = DateTime(checkOut.year, checkOut.month, checkOut.day);
   return !target.isBefore(start) && target.isBefore(end);
+}
+
+bool _checksInDuringMonth(Reservation reservation, DateTime month) {
+  final checkIn = reservation.checkIn;
+  return checkIn != null &&
+      checkIn.year == month.year &&
+      checkIn.month == month.month;
+}
+
+bool _checksInOn(Reservation reservation, DateTime date) {
+  final checkIn = reservation.checkIn;
+  return checkIn != null && _sameDay(checkIn, date);
+}
+
+bool _isCancelled(Reservation reservation) {
+  final status = reservation.status?.trim().toLowerCase();
+  return status == 'cancelled' || status == 'canceled' || status == 'キャンセル';
+}
+
+int _salesTotal(Iterable<Reservation> reservations) {
+  return reservations.fold<int>(
+    0,
+    (sum, reservation) => sum + (reservation.priceYen ?? 0),
+  );
+}
+
+String _formatYen(int value) {
+  final negative = value < 0;
+  final digits = value.abs().toString();
+  final buffer = StringBuffer();
+
+  for (var index = 0; index < digits.length; index++) {
+    if (index > 0 && (digits.length - index) % 3 == 0) {
+      buffer.write(',');
+    }
+    buffer.write(digits[index]);
+  }
+
+  return '${negative ? '-' : ''}¥$buffer';
 }
 
 int _guestCount(Reservation reservation) {
