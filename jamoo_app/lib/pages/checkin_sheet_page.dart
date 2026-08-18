@@ -19,14 +19,15 @@ class CheckinSheetPage extends StatefulWidget {
 class _CheckinSheetPageState extends State<CheckinSheetPage> {
   static const _sheetRepository = CheckinSheetRepository();
   static const _reservationRepository = DatabaseReservationRepository();
-  static const _assignmentService = RoomAssignmentService();
   static const _printService = CheckinSheetPrintService();
 
   final ScrollController _horizontalController = ScrollController();
   final ScrollController _verticalController = ScrollController();
+  late final RoomAssignmentService _assignmentService;
 
   List<Reservation> _reservations = const [];
   List<CheckinSheetRow> _rows = const [];
+  List<CheckinSheetRow> _previousRows = const [];
   List<String> _warnings = const [];
   bool _loading = true;
   bool _saving = false;
@@ -37,6 +38,7 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
   @override
   void initState() {
     super.initState();
+    _assignmentService = RoomAssignmentService(sheetDate: widget.date);
     _load();
   }
 
@@ -53,23 +55,30 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
       _error = null;
     });
     try {
-      final data = await _reservationRepository.loadCheckInsForDate(
-        widget.date,
-      );
+      final reservations = await _reservationRepository
+          .loadReservationsOverlapping(widget.date, widget.date);
       final savedRows = await _sheetRepository.load(widget.date);
+      final previousRows = await _sheetRepository.load(
+        widget.date.subtract(const Duration(days: 1)),
+      );
       final hasSavedAssignment = savedRows.any((row) => row.hasReservation);
       final result = hasSavedAssignment
-          ? _assignmentService.reconcile(savedRows, data.reservations)
-          : _assignmentService.create(data.reservations);
+          ? _assignmentService.reconcile(
+              savedRows,
+              reservations,
+              previousRows: previousRows,
+            )
+          : _assignmentService.create(reservations, previousRows: previousRows);
 
       if (!mounted) {
         return;
       }
       setState(() {
-        _reservations = data.reservations;
+        _reservations = reservations;
         _rows = result.rows;
+        _previousRows = previousRows;
         _warnings = result.warnings;
-        _dirty = !hasSavedAssignment && data.reservations.isNotEmpty;
+        _dirty = !hasSavedAssignment && reservations.isNotEmpty;
         _loading = false;
         _editorGeneration++;
       });
@@ -146,7 +155,10 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
     if (confirmed != true || !mounted) {
       return;
     }
-    final result = _assignmentService.create(_reservations);
+    final result = _assignmentService.create(
+      _reservations,
+      previousRows: _previousRows,
+    );
     setState(() {
       _rows = result.rows;
       _warnings = result.warnings;

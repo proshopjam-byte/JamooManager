@@ -9,7 +9,9 @@ class RoomAssignmentResult {
 }
 
 class RoomAssignmentService {
-  const RoomAssignmentService();
+  const RoomAssignmentService({required this.sheetDate});
+
+  final DateTime sheetDate;
 
   CheckinSheetRow assignReservation({
     required int roomNumber,
@@ -25,17 +27,71 @@ class RoomAssignmentService {
     );
   }
 
-  RoomAssignmentResult create(List<Reservation> reservations) {
+  RoomAssignmentResult create(
+    List<Reservation> reservations, {
+    List<CheckinSheetRow> previousRows = const [],
+  }) {
     final rows = GuestRoomSpec.rooms
         .map((room) => CheckinSheetRow.empty(room.number))
         .toList(growable: false);
+    _carryOver(rows, previousRows, reservations);
     return _assignMissing(rows, reservations);
+  }
+
+  void _carryOver(
+    List<CheckinSheetRow> rows,
+    List<CheckinSheetRow> previousRows,
+    List<Reservation> reservations,
+  ) {
+    final reservationByKey = {
+      for (final reservation in reservations)
+        reservationKey(reservation): reservation,
+    };
+    final detailKeys = rows
+        .where((row) => row.reservationKey != null)
+        .map((row) => row.reservationKey!)
+        .toSet();
+    for (final previous in previousRows) {
+      final key = previous.reservationKey;
+      if (key == null || previous.guestCount <= 0) {
+        continue;
+      }
+      final reservation = reservationByKey[key];
+      if (reservation == null || !_isStayover(reservation)) {
+        continue;
+      }
+      final index = rows.indexWhere(
+        (row) => row.roomNumber == previous.roomNumber,
+      );
+      if (index < 0 ||
+          rows[index].hasReservation ||
+          !GuestRoomSpec.byNumber(previous.roomNumber).isAvailable) {
+        continue;
+      }
+      final assigned = rows
+          .where((row) => row.reservationKey == key)
+          .fold<int>(0, (sum, row) => sum + row.guestCount);
+      final remaining = guestCount(reservation) - assigned;
+      if (remaining <= 0) {
+        continue;
+      }
+      final count = previous.guestCount > remaining
+          ? remaining
+          : previous.guestCount;
+      rows[index] = _rowForReservation(
+        roomNumber: previous.roomNumber,
+        reservation: reservation,
+        guestCount: count,
+        includeBookingDetails: detailKeys.add(key),
+      );
+    }
   }
 
   RoomAssignmentResult reconcile(
     List<CheckinSheetRow> savedRows,
-    List<Reservation> reservations,
-  ) {
+    List<Reservation> reservations, {
+    List<CheckinSheetRow> previousRows = const [],
+  }) {
     final activeKeys = reservations.map(reservationKey).toSet();
     final byRoom = <int, CheckinSheetRow>{
       for (final row in savedRows)
@@ -49,6 +105,7 @@ class RoomAssignmentService {
           (room) => byRoom[room.number] ?? CheckinSheetRow.empty(room.number),
         )
         .toList(growable: false);
+    _carryOver(rows, previousRows, reservations);
     return _assignMissing(rows, reservations);
   }
 
@@ -184,12 +241,13 @@ class RoomAssignmentService {
     return RoomAssignmentResult(rows: rows, warnings: _unique(warnings));
   }
 
-  static CheckinSheetRow _rowForReservation({
+  CheckinSheetRow _rowForReservation({
     required int roomNumber,
     required Reservation reservation,
     required int guestCount,
     required bool includeBookingDetails,
   }) {
+    final stayover = _isStayover(reservation);
     return CheckinSheetRow(
       roomNumber: roomNumber,
       reservationKey: reservationKey(reservation),
@@ -197,15 +255,48 @@ class RoomAssignmentService {
       reservationNumber: reservation.reservationNumber ?? reservation.id,
       guestName: reservation.displayGuestName,
       guestCount: guestCount,
-      checkedIn: false,
-      amountYen: includeBookingDetails ? reservation.priceYen : null,
-      payment: includeBookingDetails ? _defaultPayment(reservation) : '',
+      checkedIn: stayover,
+      amountYen: includeBookingDetails && !stayover
+          ? reservation.priceYen
+          : null,
+      payment: includeBookingDetails && !stayover
+          ? _defaultPayment(reservation)
+          : '',
       dinnerAndTable: reservation.hasDinner == true ? 'あり' : '',
       bathTime: '',
       breakfastTime: '',
       checkedOut: false,
-      notes: includeBookingDetails ? reservation.specialRequests ?? '' : '',
+      notes: includeBookingDetails ? _notesFor(reservation, stayover) : '',
     );
+  }
+
+  bool _isStayover(Reservation reservation) {
+    final checkIn = reservation.checkIn;
+    if (checkIn == null) {
+      return false;
+    }
+    final arrival = DateTime(checkIn.year, checkIn.month, checkIn.day);
+    final target = DateTime(sheetDate.year, sheetDate.month, sheetDate.day);
+    return target.isAfter(arrival);
+  }
+
+  String _notesFor(Reservation reservation, bool stayover) {
+    final original = reservation.specialRequests?.trim() ?? '';
+    if (!stayover || reservation.checkIn == null) {
+      return original;
+    }
+    final arrival = DateTime(
+      reservation.checkIn!.year,
+      reservation.checkIn!.month,
+      reservation.checkIn!.day,
+    );
+    final target = DateTime(sheetDate.year, sheetDate.month, sheetDate.day);
+    final stayDay = target.difference(arrival).inDays + 1;
+    final nights = reservation.nights;
+    final label = nights != null && nights > 0
+        ? '連泊 $stayDay日目（全$nights泊）'
+        : '連泊 $stayDay日目';
+    return original.isEmpty ? label : '$label / $original';
   }
 
   static List<int> _candidateRoomNumbers(Reservation reservation) {

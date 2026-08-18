@@ -28,7 +28,7 @@ class CheckinSheetPrintService {
             canChangeOrientation: false,
             actions: [
               IconButton(
-                tooltip: 'A4横で印刷',
+                tooltip: 'A4横PDFを開いて印刷',
                 onPressed: () => _print(date, rows),
                 icon: const Icon(Icons.print_outlined),
               ),
@@ -40,21 +40,14 @@ class CheckinSheetPrintService {
   }
 
   Future<void> _print(DateTime date, List<CheckinSheetRow> rows) async {
-    await Printing.layoutPdf(
-      name: 'checkin_sheet_${_fileDate(date)}.pdf',
-      format: PdfPageFormat.a4.landscape,
-      dynamicLayout: false,
-      usePrinterSettings: true,
-      forceCustomPrintPaper: false,
-      windowsModernDialog: true,
-      onLayout: (_) => _buildPdf(date, rows),
+    final bytes = await _buildPdf(date, rows);
+    await Printing.sharePdf(
+      bytes: bytes,
+      filename: 'checkin_sheet_${_fileDate(date)}.pdf',
     );
   }
 
-  Future<Uint8List> _buildPdf(
-    DateTime date,
-    List<CheckinSheetRow> rows,
-  ) async {
+  Future<Uint8List> _buildPdf(DateTime date, List<CheckinSheetRow> rows) async {
     final document = pw.Document();
     final regular = await PdfGoogleFonts.notoSansJPRegular();
     final bold = await PdfGoogleFonts.notoSansJPBold();
@@ -120,8 +113,7 @@ class CheckinSheetPrintService {
                 },
                 children: [
                   _headerRow(),
-                  for (final row in sortedRows)
-                    _dataRow(row, displayedKeys),
+                  for (final row in sortedRows) _dataRow(row, displayedKeys),
                 ],
               ),
               pw.SizedBox(height: 7),
@@ -188,10 +180,7 @@ class CheckinSheetPrintService {
     );
   }
 
-  static pw.TableRow _dataRow(
-    CheckinSheetRow row,
-    Set<String> displayedKeys,
-  ) {
+  static pw.TableRow _dataRow(CheckinSheetRow row, Set<String> displayedKeys) {
     final unavailable = !row.room.isAvailable;
     var guestName = row.guestName;
     final key = row.reservationKey;
