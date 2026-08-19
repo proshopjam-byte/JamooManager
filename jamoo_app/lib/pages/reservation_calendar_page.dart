@@ -496,11 +496,16 @@ class _CalendarDay extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final chillnnCount = reservations
         .where((reservation) => reservation.source.toUpperCase() == 'CHILLNN')
-        .length;
+        .fold<int>(0, (sum, reservation) => sum + reservation.roomCount);
     final manualCount = reservations
         .where((reservation) => reservation.source.toUpperCase() == 'MANUAL')
-        .length;
-    final bookingCount = reservations.length - chillnnCount - manualCount;
+        .fold<int>(0, (sum, reservation) => sum + reservation.roomCount);
+    final bookingCount = reservations
+        .where((reservation) {
+          final source = reservation.source.toUpperCase();
+          return source != 'CHILLNN' && source != 'MANUAL';
+        })
+        .fold<int>(0, (sum, reservation) => sum + reservation.roomCount);
     final breakfastGuests = reservations
         .where((reservation) => reservation.hasBreakfast == true)
         .fold<int>(
@@ -721,6 +726,10 @@ class _SelectedDateReservations extends StatelessWidget {
           (reservation.adults ?? 0) + reservation.children;
       return sum + count;
     });
+    final totalRooms = reservations.fold<int>(
+      0,
+      (sum, reservation) => sum + reservation.roomCount,
+    );
     final breakfastGuests = allReservations
         .where(
           (reservation) =>
@@ -756,7 +765,7 @@ class _SelectedDateReservations extends StatelessWidget {
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 4),
-            Text('${reservations.length}室・$totalGuests名'),
+            Text('$totalRooms室・$totalGuests名'),
             if (selectedCheckIns.isNotEmpty) ...[
               const SizedBox(height: 6),
               Row(
@@ -883,6 +892,7 @@ class _ReservationTile extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(reservation.displayRoomName),
+          if (reservation.roomCount > 1) Text('利用客室 ${reservation.roomCount}室'),
           Text(reservation.displayStayPeriod),
           Text('${reservation.displayGuestCount}・${reservation.displayPrice}'),
           if (reservation.reservationNumber != null)

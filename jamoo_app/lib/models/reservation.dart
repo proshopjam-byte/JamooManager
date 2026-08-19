@@ -119,6 +119,58 @@ class Reservation {
     return value == null || value.isEmpty ? '部屋未設定' : value;
   }
 
+  /// Number of rooms represented by this reservation.
+  ///
+  /// Booking.com may store multiple booked room types in one reservation,
+  /// for example: `1 x Standard Twin Room, 1 x ロフト付き4人部屋`.
+  /// When no explicit quantity is present, one reservation is treated as one
+  /// room so existing CHILLNN and manually entered reservations keep working.
+  int get roomCount {
+    final value = roomName?.trim();
+    if (value == null || value.isEmpty) return 1;
+
+    final prefixedQuantityPattern = RegExp(
+      r'(?:^|[,\u3001\uff0c/+\uff0b])\s*(\d+)\s*[xX\u00d7]\s*',
+    );
+    final prefixedTotal = _sumRoomQuantities(
+      prefixedQuantityPattern.allMatches(value),
+    );
+    if (prefixedTotal > 0) return prefixedTotal;
+
+    final suffixedQuantityPattern = RegExp(
+      r'(?:Standard\s*Twin\s*Room|Twin\s*Room|Quadruple\s*Room\s*with\s*Loft|'
+      r'スタンダード\s*ツイン(?:ルーム)?|ツイン(?:ルーム)?|'
+      r'ロフト付き(?:4人部屋)?|ロフト(?:付き)?(?:ルーム)?)'
+      r'\s*[xX\u00d7]\s*(\d+)',
+      caseSensitive: false,
+    );
+    final suffixedTotal = _sumRoomQuantities(
+      suffixedQuantityPattern.allMatches(value),
+    );
+    if (suffixedTotal > 0) return suffixedTotal;
+
+    final roomTypePattern = RegExp(
+      r'Standard\s*Twin\s*Room|Twin\s*Room|Quadruple\s*Room\s*with\s*Loft|'
+      r'スタンダード\s*ツイン(?:ルーム)?|ツイン(?:ルーム)?|'
+      r'ロフト付き|ロフト',
+      caseSensitive: false,
+    );
+    final separatedRoomCount = value
+        .split(RegExp(r'\s*[,\u3001\uff0c/+\uff0b]\s*'))
+        .where((part) => roomTypePattern.hasMatch(part))
+        .length;
+    if (separatedRoomCount > 1) return separatedRoomCount;
+
+    final compactJapanesePattern = RegExp(
+      r'(?:スタンダードツイン(?:ルーム)?|ツイン(?:ルーム)?|'
+      r'ロフト付き|ロフト)(\d+)(?!\d*(?:人|名))',
+    );
+    final compactTotal = _sumRoomQuantities(
+      compactJapanesePattern.allMatches(value.replaceAll(RegExp(r'\s+'), '')),
+    );
+    return compactTotal > 0 ? compactTotal : 1;
+  }
+
   String get displayStayPeriod {
     final checkInText = _formatDate(checkIn);
     final checkOutText = _formatDate(checkOut);
@@ -290,5 +342,12 @@ class Reservation {
     }
 
     return value < 0 ? '-${buffer.toString()}' : buffer.toString();
+  }
+
+  static int _sumRoomQuantities(Iterable<RegExpMatch> matches) {
+    return matches.fold<int>(
+      0,
+      (sum, match) => sum + (int.tryParse(match.group(1) ?? '') ?? 0),
+    );
   }
 }
