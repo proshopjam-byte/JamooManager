@@ -302,7 +302,10 @@ class CheckinCardPrintService {
 
   static String _discoverySource(Reservation reservation) {
     final source = reservation.source.trim().toLowerCase();
-    final isPortal = source.contains('booking');
+    final isPortal =
+        source.contains('booking') ||
+        source.contains('rakuten') ||
+        source.contains('jalan');
     final isOfficialWebsite = source.contains('chillnn');
 
     final portalBox = isPortal ? '■' : '□';

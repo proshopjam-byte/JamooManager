@@ -5,10 +5,7 @@ import '../core/app_paths.dart';
 import '../models/reservation_data.dart';
 
 class ReservationRepository {
-  const ReservationRepository({
-    this.jsonFilePath,
-    this.projectRootPath,
-  });
+  const ReservationRepository({this.jsonFilePath, this.projectRootPath});
 
   final String? jsonFilePath;
   final String? projectRootPath;
@@ -18,9 +15,7 @@ class ReservationRepository {
 
     try {
       final bytes = await file.readAsBytes();
-      final text = _removeUtf8Bom(
-        utf8.decode(bytes),
-      );
+      final text = _removeUtf8Bom(utf8.decode(bytes));
       final decoded = jsonDecode(text);
 
       if (decoded is! Map<String, dynamic>) {
@@ -33,9 +28,7 @@ class ReservationRepository {
     } on ReservationRepositoryException {
       rethrow;
     } on FormatException catch (error) {
-      throw ReservationRepositoryException(
-        '予約JSONの形式が正しくありません。\n$error',
-      );
+      throw ReservationRepositoryException('予約JSONの形式が正しくありません。\n$error');
     } on FileSystemException catch (error) {
       throw ReservationRepositoryException(
         '予約JSONを読み込めませんでした。\n'
@@ -109,11 +102,8 @@ class ReservationRepository {
     }
   }
 
-  static String _removeUtf8Bom(
-    String value,
-  ) {
-    if (value.isNotEmpty &&
-        value.codeUnitAt(0) == 0xFEFF) {
+  static String _removeUtf8Bom(String value) {
+    if (value.isNotEmpty && value.codeUnitAt(0) == 0xFEFF) {
       return value.substring(1);
     }
 
@@ -122,9 +112,7 @@ class ReservationRepository {
 }
 
 class ReservationRepositoryException implements Exception {
-  const ReservationRepositoryException(
-    this.message,
-  );
+  const ReservationRepositoryException(this.message);
 
   final String message;
 

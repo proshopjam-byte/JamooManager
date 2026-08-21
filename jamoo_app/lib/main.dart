@@ -14,6 +14,7 @@ import 'services/booking_sync_service.dart';
 import 'services/checkin_card_print_service.dart';
 import 'services/chillnn_sync_service.dart';
 import 'services/database_service.dart';
+import 'services/portal_sync_service.dart';
 import 'services/reservation_import_service.dart';
 
 void main() {
@@ -74,6 +75,10 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
 
   ChillnnSyncService _createChillnnSyncService() {
     return ChillnnSyncService(projectRootPath: _settings.managerRootPath);
+  }
+
+  PortalSyncService _createPortalSyncService() {
+    return PortalSyncService(projectRootPath: _settings.managerRootPath);
   }
 
   @override
@@ -388,6 +393,66 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
     }
   }
 
+  Future<void> _syncFromPortals() async {
+    if (_isSyncing || _isLoadingSettings) {
+      return;
+    }
+
+    setState(() {
+      _isSyncing = true;
+    });
+
+    try {
+      final syncResult = await _createPortalSyncService().run();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _reservationDataFuture = _loadSelectedDateCheckIns();
+      });
+      if (syncResult.failed > 0) {
+        await _showErrorDialog(
+          title: '一部の楽天・じゃらんメールを取り込めませんでした',
+          message:
+              '${syncResult.summary}\n\n'
+              '${syncResult.errorDetails ?? ''}',
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 8),
+            content: Text(
+              '楽天・じゃらん予約を取得して保存しました。\n'
+              '${syncResult.summary}',
+            ),
+          ),
+        );
+      }
+    } on PortalSyncException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      await _showErrorDialog(
+        title: '楽天・じゃらんから取得できませんでした',
+        message: error.message,
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      await _showErrorDialog(
+        title: '楽天・じゃらん取得中にエラーが発生しました',
+        message: error.toString(),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSyncing = false;
+        });
+      }
+    }
+  }
+
   Future<void> _showErrorDialog({
     required String title,
     required String message,
@@ -456,6 +521,16 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
             tooltip: '顧客一覧',
             onPressed: _isLoadingSettings ? null : _openCustomerList,
             icon: const Icon(Icons.people_alt_outlined),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: OutlinedButton.icon(
+              onPressed: _isSyncing || _isLoadingSettings
+                  ? null
+                  : _syncFromPortals,
+              icon: const Icon(Icons.travel_explore_outlined),
+              label: const Text('楽天・じゃらん'),
+            ),
           ),
           Padding(
             padding: const EdgeInsets.only(right: 8),

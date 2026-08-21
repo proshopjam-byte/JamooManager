@@ -120,6 +120,11 @@ String _reservationSourceLabel(String source) {
       return 'Booking.com';
     case 'CHILLNN':
       return 'CHILLNN';
+    case 'RAKUTEN':
+    case 'RAKUTEN TRAVEL':
+      return '楽天トラベル';
+    case 'JALAN':
+      return 'じゃらん';
     default:
       return source.trim();
   }

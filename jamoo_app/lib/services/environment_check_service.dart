@@ -3,9 +3,7 @@ import 'dart:io';
 import '../core/app_paths.dart';
 
 class EnvironmentCheckService {
-  const EnvironmentCheckService({
-    this.projectRootPath,
-  });
+  const EnvironmentCheckService({this.projectRootPath});
 
   final String? projectRootPath;
 
@@ -27,9 +25,7 @@ class EnvironmentCheckService {
     AppPaths? paths;
 
     try {
-      paths = await AppPaths.resolve(
-        projectRootPath: projectRootPath,
-      );
+      paths = await AppPaths.resolve(projectRootPath: projectRootPath);
 
       checks.add(
         EnvironmentCheckItem(
@@ -54,8 +50,7 @@ class EnvironmentCheckService {
         command: 'where.exe',
         arguments: const ['node'],
         successMessage: 'Node.jsを確認しました。',
-        failureMessage:
-            'Node.jsが見つかりません。node --version を確認してください。',
+        failureMessage: 'Node.jsが見つかりません。node --version を確認してください。',
       ),
     );
 
@@ -74,39 +69,30 @@ class EnvironmentCheckService {
         await _checkFile(
           label: 'Booking.com取得プログラム',
           file: paths.bookingScript,
-          missingMessage:
-              r'booking_bot\booking.js が見つかりません。',
+          missingMessage: r'booking_bot\booking.js が見つかりません。',
         ),
       );
 
       final packageJson = File(
-        AppPaths.join(
-          paths.bookingBotDirectory.path,
-          const ['package.json'],
-        ),
+        AppPaths.join(paths.bookingBotDirectory.path, const ['package.json']),
       );
 
       checks.add(
         await _checkFile(
           label: 'Node.jsプロジェクト設定',
           file: packageJson,
-          missingMessage:
-              r'booking_bot\package.json が見つかりません。',
+          missingMessage: r'booking_bot\package.json が見つかりません。',
         ),
       );
 
       final playwrightDirectory = Directory(
-        AppPaths.join(
-          paths.bookingBotDirectory.path,
-          const [
-            'node_modules',
-            'playwright',
-          ],
-        ),
+        AppPaths.join(paths.bookingBotDirectory.path, const [
+          'node_modules',
+          'playwright',
+        ]),
       );
 
-      final playwrightExists =
-          await playwrightDirectory.exists();
+      final playwrightExists = await playwrightDirectory.exists();
 
       checks.add(
         EnvironmentCheckItem(
@@ -117,15 +103,11 @@ class EnvironmentCheckService {
           message: playwrightExists
               ? 'Playwrightがインストールされています。'
               : 'Playwrightが見つかりません。'
-                  'booking_botで npm.cmd install playwright を実行してください。',
+                    'booking_botで npm.cmd install playwright を実行してください。',
         ),
       );
 
-      checks.add(
-        await _checkReservationJson(
-          paths.reservationJson,
-        ),
-      );
+      checks.add(await _checkReservationJson(paths.reservationJson));
     }
 
     return EnvironmentCheckReport(
@@ -142,20 +124,14 @@ class EnvironmentCheckService {
     required String failureMessage,
   }) async {
     try {
-      final result = await Process.run(
-        command,
-        arguments,
-        runInShell: true,
-      );
+      final result = await Process.run(command, arguments, runInShell: true);
 
       return EnvironmentCheckItem(
         label: label,
         status: result.exitCode == 0
             ? EnvironmentCheckStatus.ok
             : EnvironmentCheckStatus.error,
-        message: result.exitCode == 0
-            ? successMessage
-            : failureMessage,
+        message: result.exitCode == 0 ? successMessage : failureMessage,
       );
     } on ProcessException catch (error) {
       return EnvironmentCheckItem(
@@ -175,23 +151,18 @@ class EnvironmentCheckService {
 
     return EnvironmentCheckItem(
       label: label,
-      status: exists
-          ? EnvironmentCheckStatus.ok
-          : EnvironmentCheckStatus.error,
-      message: exists
-          ? file.path
-          : '$missingMessage\n${file.path}',
+      status: exists ? EnvironmentCheckStatus.ok : EnvironmentCheckStatus.error,
+      message: exists ? file.path : '$missingMessage\n${file.path}',
     );
   }
 
-  Future<EnvironmentCheckItem> _checkReservationJson(
-    File file,
-  ) async {
+  Future<EnvironmentCheckItem> _checkReservationJson(File file) async {
     if (!await file.exists()) {
       return EnvironmentCheckItem(
         label: '予約JSON',
         status: EnvironmentCheckStatus.warning,
-        message: 'まだ予約JSONがありません。'
+        message:
+            'まだ予約JSONがありません。'
             'Booking.comから取得すると作成されます。\n${file.path}',
       );
     }
@@ -213,83 +184,59 @@ class EnvironmentCheckService {
         message: isToday
             ? '本日更新されています。\n${file.path}'
             : '最終更新が本日ではありません。\n'
-                '${_formatDateTime(modifiedAt)}\n${file.path}',
+                  '${_formatDateTime(modifiedAt)}\n${file.path}',
       );
     } on FileSystemException catch (error) {
       return EnvironmentCheckItem(
         label: '予約JSON',
         status: EnvironmentCheckStatus.error,
-        message: '予約JSONの状態を確認できませんでした。\n'
+        message:
+            '予約JSONの状態を確認できませんでした。\n'
             '${error.message}\n${file.path}',
       );
     }
   }
 
-  static String _formatDateTime(
-    DateTime value,
-  ) {
+  static String _formatDateTime(DateTime value) {
     final local = value.toLocal();
 
-    final year =
-        local.year.toString().padLeft(4, '0');
-    final month =
-        local.month.toString().padLeft(2, '0');
-    final day =
-        local.day.toString().padLeft(2, '0');
-    final hour =
-        local.hour.toString().padLeft(2, '0');
-    final minute =
-        local.minute.toString().padLeft(2, '0');
+    final year = local.year.toString().padLeft(4, '0');
+    final month = local.month.toString().padLeft(2, '0');
+    final day = local.day.toString().padLeft(2, '0');
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
 
     return '$year/$month/$day $hour:$minute';
   }
 }
 
 class EnvironmentCheckReport {
-  const EnvironmentCheckReport({
-    required this.checkedAt,
-    required this.items,
-  });
+  const EnvironmentCheckReport({required this.checkedAt, required this.items});
 
   final DateTime checkedAt;
   final List<EnvironmentCheckItem> items;
 
   bool get hasErrors {
-    return items.any(
-      (item) =>
-          item.status == EnvironmentCheckStatus.error,
-    );
+    return items.any((item) => item.status == EnvironmentCheckStatus.error);
   }
 
   bool get hasWarnings {
-    return items.any(
-      (item) =>
-          item.status == EnvironmentCheckStatus.warning,
-    );
+    return items.any((item) => item.status == EnvironmentCheckStatus.warning);
   }
 
   int get errorCount {
     return items
-        .where(
-          (item) =>
-              item.status ==
-              EnvironmentCheckStatus.error,
-        )
+        .where((item) => item.status == EnvironmentCheckStatus.error)
         .length;
   }
 
   int get warningCount {
     return items
-        .where(
-          (item) =>
-              item.status ==
-              EnvironmentCheckStatus.warning,
-        )
+        .where((item) => item.status == EnvironmentCheckStatus.warning)
         .length;
   }
 
-  bool get isReady =>
-      !hasErrors && !hasWarnings;
+  bool get isReady => !hasErrors && !hasWarnings;
 }
 
 class EnvironmentCheckItem {
@@ -304,8 +251,4 @@ class EnvironmentCheckItem {
   final String message;
 }
 
-enum EnvironmentCheckStatus {
-  ok,
-  warning,
-  error,
-}
+enum EnvironmentCheckStatus { ok, warning, error }

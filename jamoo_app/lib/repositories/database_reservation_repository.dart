@@ -206,6 +206,7 @@ class DatabaseReservationRepository {
 
     final rawData = _readJsonData(row['raw_payload']);
     final manualData = rawData?['manual'] == true ? rawData : null;
+    final portalData = rawData?['portalMail'] == true ? rawData : null;
     final planName = _readText(row['plan_name']);
     final inferredMeals = _inferMeals(planName);
     final overrideBreakfast = _readBool(row['override_has_breakfast']);
@@ -223,6 +224,7 @@ class DatabaseReservationRepository {
     final hasBreakfast =
         overrideBreakfast ??
         manualData?['hasBreakfast'] as bool? ??
+        portalData?['hasBreakfast'] as bool? ??
         inferredMeals.breakfast;
 
     return Reservation(
@@ -257,6 +259,7 @@ class DatabaseReservationRepository {
       hasDinner:
           overrideDinner ??
           manualData?['hasDinner'] as bool? ??
+          portalData?['hasDinner'] as bool? ??
           inferredMeals.dinner,
       planName: planName,
     );

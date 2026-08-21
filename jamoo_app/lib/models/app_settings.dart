@@ -37,26 +37,14 @@ class AppSettings {
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
     return AppSettings(
-      appName: _readString(
-        json['appName'],
-        defaults.appName,
-      ),
-      facilityName: _readString(
-        json['facilityName'],
-        defaults.facilityName,
-      ),
+      appName: _readString(json['appName'], defaults.appName),
+      facilityName: _readString(json['facilityName'], defaults.facilityName),
       bookingSourceName: _readString(
         json['bookingSourceName'],
         defaults.bookingSourceName,
       ),
-      timeZone: _readString(
-        json['timeZone'],
-        defaults.timeZone,
-      ),
-      showPrice: _readBool(
-        json['showPrice'],
-        defaults.showPrice,
-      ),
+      timeZone: _readString(json['timeZone'], defaults.timeZone),
+      showPrice: _readBool(json['showPrice'], defaults.showPrice),
       showReservationNumber: _readBool(
         json['showReservationNumber'],
         defaults.showReservationNumber,
@@ -65,9 +53,7 @@ class AppSettings {
         json['showArrivalTime'],
         defaults.showArrivalTime,
       ),
-      managerRootPath: _readNullableString(
-        json['managerRootPath'],
-      ),
+      managerRootPath: _readNullableString(json['managerRootPath']),
     );
   }
 
@@ -98,14 +84,12 @@ class AppSettings {
     return AppSettings(
       appName: appName ?? this.appName,
       facilityName: facilityName ?? this.facilityName,
-      bookingSourceName:
-          bookingSourceName ?? this.bookingSourceName,
+      bookingSourceName: bookingSourceName ?? this.bookingSourceName,
       timeZone: timeZone ?? this.timeZone,
       showPrice: showPrice ?? this.showPrice,
       showReservationNumber:
           showReservationNumber ?? this.showReservationNumber,
-      showArrivalTime:
-          showArrivalTime ?? this.showArrivalTime,
+      showArrivalTime: showArrivalTime ?? this.showArrivalTime,
       managerRootPath: clearManagerRootPath
           ? null
           : managerRootPath ?? this.managerRootPath,
@@ -122,10 +106,7 @@ class AppSettings {
     return value;
   }
 
-  static String _readString(
-    dynamic value,
-    String fallback,
-  ) {
+  static String _readString(dynamic value, String fallback) {
     if (value == null) {
       return fallback;
     }
@@ -134,9 +115,7 @@ class AppSettings {
     return text.isEmpty ? fallback : text;
   }
 
-  static String? _readNullableString(
-    dynamic value,
-  ) {
+  static String? _readNullableString(dynamic value) {
     if (value == null) {
       return null;
     }
@@ -145,10 +124,7 @@ class AppSettings {
     return text.isEmpty ? null : text;
   }
 
-  static bool _readBool(
-    dynamic value,
-    bool fallback,
-  ) {
+  static bool _readBool(dynamic value, bool fallback) {
     if (value is bool) {
       return value;
     }

@@ -33,28 +33,24 @@ class ReservationData {
     final rawReservations = json['reservations'];
 
     if (rawReservations is! List) {
-      throw const FormatException(
-        'reservations が配列ではありません。',
-      );
+      throw const FormatException('reservations が配列ではありません。');
     }
 
-    final reservations = rawReservations.map((item) {
-      if (item is! Map<String, dynamic>) {
-        throw const FormatException(
-          'reservations 内のデータ形式が不正です。',
-        );
-      }
+    final reservations = rawReservations
+        .map((item) {
+          if (item is! Map<String, dynamic>) {
+            throw const FormatException('reservations 内のデータ形式が不正です。');
+          }
 
-      return Reservation.fromJson(item);
-    }).toList(growable: false);
+          return Reservation.fromJson(item);
+        })
+        .toList(growable: false);
 
     final declaredCount = _readNullableInt(json['count']);
 
     return ReservationData(
-      schemaVersion:
-          _readNullableInt(json['schemaVersion']) ?? 1,
-      generatedAt:
-          _readNullableDateTime(json['generatedAt']),
+      schemaVersion: _readNullableInt(json['schemaVersion']) ?? 1,
+      generatedAt: _readNullableDateTime(json['generatedAt']),
       source: _readRequiredString(json, 'source'),
       scope: _readNullableString(json['scope']),
       targetDate: _readNullableDate(json['targetDate']),
@@ -81,8 +77,7 @@ class ReservationData {
 
   bool get isNotEmpty => reservations.isNotEmpty;
 
-  bool get isTodayCheckIns =>
-      scope == 'today_checkins';
+  bool get isTodayCheckIns => scope == 'today_checkins';
 
   bool get hasTargetDate => targetDate != null;
 
@@ -118,16 +113,14 @@ class ReservationData {
   int get totalGuests {
     return reservations.fold<int>(
       0,
-      (sum, reservation) =>
-          sum + (reservation.totalGuests ?? 0),
+      (sum, reservation) => sum + (reservation.totalGuests ?? 0),
     );
   }
 
   int get totalPriceYen {
     return reservations.fold<int>(
       0,
-      (sum, reservation) =>
-          sum + (reservation.priceYen ?? 0),
+      (sum, reservation) => sum + (reservation.priceYen ?? 0),
     );
   }
 
@@ -139,9 +132,7 @@ class ReservationData {
       final secondDate = second.checkIn;
 
       if (firstDate == null && secondDate == null) {
-        return first.displayGuestName.compareTo(
-          second.displayGuestName,
-        );
+        return first.displayGuestName.compareTo(second.displayGuestName);
       }
 
       if (firstDate == null) {
@@ -152,56 +143,40 @@ class ReservationData {
         return -1;
       }
 
-      final dateComparison =
-          firstDate.compareTo(secondDate);
+      final dateComparison = firstDate.compareTo(secondDate);
 
       if (dateComparison != 0) {
         return dateComparison;
       }
 
-      return first.displayGuestName.compareTo(
-        second.displayGuestName,
-      );
+      return first.displayGuestName.compareTo(second.displayGuestName);
     });
 
     return List.unmodifiable(sorted);
   }
 
   List<Reservation> reservationsForDate(DateTime date) {
-    final target = DateTime(
-      date.year,
-      date.month,
-      date.day,
-    );
+    final target = DateTime(date.year, date.month, date.day);
 
-    return reservations.where((reservation) {
-      final checkIn = reservation.checkIn;
-      final checkOut = reservation.checkOut;
+    return reservations
+        .where((reservation) {
+          final checkIn = reservation.checkIn;
+          final checkOut = reservation.checkOut;
 
-      if (checkIn == null || checkOut == null) {
-        return false;
-      }
+          if (checkIn == null || checkOut == null) {
+            return false;
+          }
 
-      final start = DateTime(
-        checkIn.year,
-        checkIn.month,
-        checkIn.day,
-      );
+          final start = DateTime(checkIn.year, checkIn.month, checkIn.day);
 
-      final end = DateTime(
-        checkOut.year,
-        checkOut.month,
-        checkOut.day,
-      );
+          final end = DateTime(checkOut.year, checkOut.month, checkOut.day);
 
-      return !target.isBefore(start) &&
-          target.isBefore(end);
-    }).toList(growable: false);
+          return !target.isBefore(start) && target.isBefore(end);
+        })
+        .toList(growable: false);
   }
 
-  Reservation? findByReservationNumber(
-    String reservationNumber,
-  ) {
+  Reservation? findByReservationNumber(String reservationNumber) {
     final target = reservationNumber.trim();
 
     if (target.isEmpty) {
@@ -217,10 +192,7 @@ class ReservationData {
     return null;
   }
 
-  static String _readRequiredString(
-    Map<String, dynamic> json,
-    String key,
-  ) {
+  static String _readRequiredString(Map<String, dynamic> json, String key) {
     final value = _readNullableString(json[key]);
 
     if (value == null) {
@@ -230,9 +202,7 @@ class ReservationData {
     return value;
   }
 
-  static String? _readNullableString(
-    dynamic value,
-  ) {
+  static String? _readNullableString(dynamic value) {
     if (value == null) {
       return null;
     }
@@ -257,9 +227,7 @@ class ReservationData {
     return int.tryParse(value.toString());
   }
 
-  static DateTime? _readNullableDateTime(
-    dynamic value,
-  ) {
+  static DateTime? _readNullableDateTime(dynamic value) {
     final text = _readNullableString(value);
 
     if (text == null) {
@@ -269,20 +237,14 @@ class ReservationData {
     return DateTime.tryParse(text);
   }
 
-  static DateTime? _readNullableDate(
-    dynamic value,
-  ) {
+  static DateTime? _readNullableDate(dynamic value) {
     final parsed = _readNullableDateTime(value);
 
     if (parsed == null) {
       return null;
     }
 
-    return DateTime(
-      parsed.year,
-      parsed.month,
-      parsed.day,
-    );
+    return DateTime(parsed.year, parsed.month, parsed.day);
   }
 
   static String? _dateToJson(DateTime? value) {
@@ -290,12 +252,9 @@ class ReservationData {
       return null;
     }
 
-    final year =
-        value.year.toString().padLeft(4, '0');
-    final month =
-        value.month.toString().padLeft(2, '0');
-    final day =
-        value.day.toString().padLeft(2, '0');
+    final year = value.year.toString().padLeft(4, '0');
+    final month = value.month.toString().padLeft(2, '0');
+    final day = value.day.toString().padLeft(2, '0');
 
     return '$year-$month-$day';
   }

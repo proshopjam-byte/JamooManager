@@ -5,10 +5,7 @@ import '../repositories/settings_repository.dart';
 import '../services/environment_check_service.dart';
 
 class SettingsPage extends StatefulWidget {
-  const SettingsPage({
-    super.key,
-    required this.initialSettings,
-  });
+  const SettingsPage({super.key, required this.initialSettings});
 
   final AppSettings initialSettings;
 
@@ -17,8 +14,7 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  final SettingsRepository _repository =
-      const SettingsRepository();
+  final SettingsRepository _repository = const SettingsRepository();
 
   late final TextEditingController _appNameController;
   late final TextEditingController _facilityNameController;
@@ -39,25 +35,20 @@ class _SettingsPageState extends State<SettingsPage> {
 
     final settings = widget.initialSettings;
 
-    _appNameController = TextEditingController(
-      text: settings.appName,
-    );
+    _appNameController = TextEditingController(text: settings.appName);
     _facilityNameController = TextEditingController(
       text: settings.facilityName,
     );
     _bookingSourceController = TextEditingController(
       text: settings.bookingSourceName,
     );
-    _timeZoneController = TextEditingController(
-      text: settings.timeZone,
-    );
+    _timeZoneController = TextEditingController(text: settings.timeZone);
     _managerRootPathController = TextEditingController(
       text: settings.managerRootPath ?? '',
     );
 
     _showPrice = settings.showPrice;
-    _showReservationNumber =
-        settings.showReservationNumber;
+    _showReservationNumber = settings.showReservationNumber;
     _showArrivalTime = settings.showArrivalTime;
   }
 
@@ -77,13 +68,10 @@ class _SettingsPageState extends State<SettingsPage> {
     }
 
     final appName = _appNameController.text.trim();
-    final facilityName =
-        _facilityNameController.text.trim();
-    final bookingSourceName =
-        _bookingSourceController.text.trim();
+    final facilityName = _facilityNameController.text.trim();
+    final bookingSourceName = _bookingSourceController.text.trim();
     final timeZone = _timeZoneController.text.trim();
-    final managerRootPath =
-        _managerRootPathController.text.trim();
+    final managerRootPath = _managerRootPathController.text.trim();
 
     if (appName.isEmpty ||
         facilityName.isEmpty ||
@@ -91,7 +79,8 @@ class _SettingsPageState extends State<SettingsPage> {
         timeZone.isEmpty) {
       await _showMessage(
         title: '入力を確認してください',
-        message: 'アプリ名、施設名、予約サイト名、'
+        message:
+            'アプリ名、施設名、予約サイト名、'
             'タイムゾーンを入力してください。',
       );
       return;
@@ -103,11 +92,9 @@ class _SettingsPageState extends State<SettingsPage> {
       bookingSourceName: bookingSourceName,
       timeZone: timeZone,
       showPrice: _showPrice,
-      showReservationNumber:
-          _showReservationNumber,
+      showReservationNumber: _showReservationNumber,
       showArrivalTime: _showArrivalTime,
-      managerRootPath:
-          managerRootPath.isEmpty ? null : managerRootPath,
+      managerRootPath: managerRootPath.isEmpty ? null : managerRootPath,
     );
 
     setState(() {
@@ -127,19 +114,13 @@ class _SettingsPageState extends State<SettingsPage> {
         return;
       }
 
-      await _showMessage(
-        title: '設定を保存できませんでした',
-        message: error.message,
-      );
+      await _showMessage(title: '設定を保存できませんでした', message: error.message);
     } catch (error) {
       if (!mounted) {
         return;
       }
 
-      await _showMessage(
-        title: '予期しないエラーが発生しました',
-        message: error.toString(),
-      );
+      await _showMessage(title: '予期しないエラーが発生しました', message: error.toString());
     } finally {
       if (mounted) {
         setState(() {
@@ -155,9 +136,7 @@ class _SettingsPageState extends State<SettingsPage> {
       builder: (context) {
         return AlertDialog(
           title: const Text('初期設定に戻しますか？'),
-          content: const Text(
-            '施設名や表示設定をJamooManagerの初期状態に戻します。',
-          ),
+          content: const Text('施設名や表示設定をJamooManagerの初期状態に戻します。'),
           actions: [
             TextButton(
               onPressed: () {
@@ -184,24 +163,19 @@ class _SettingsPageState extends State<SettingsPage> {
 
     setState(() {
       _appNameController.text = defaults.appName;
-      _facilityNameController.text =
-          defaults.facilityName;
-      _bookingSourceController.text =
-          defaults.bookingSourceName;
+      _facilityNameController.text = defaults.facilityName;
+      _bookingSourceController.text = defaults.bookingSourceName;
       _timeZoneController.text = defaults.timeZone;
-      _managerRootPathController.text =
-          defaults.managerRootPath ?? '';
+      _managerRootPathController.text = defaults.managerRootPath ?? '';
       _showPrice = defaults.showPrice;
-      _showReservationNumber =
-          defaults.showReservationNumber;
+      _showReservationNumber = defaults.showReservationNumber;
       _showArrivalTime = defaults.showArrivalTime;
     });
   }
 
   void _useCurrentProjectPath() {
     setState(() {
-      _managerRootPathController.text =
-          r'C:\work\JamooManager';
+      _managerRootPathController.text = r'C:\work\JamooManager';
     });
   }
 
@@ -210,8 +184,7 @@ class _SettingsPageState extends State<SettingsPage> {
       return;
     }
 
-    final enteredPath =
-        _managerRootPathController.text.trim();
+    final enteredPath = _managerRootPathController.text.trim();
 
     setState(() {
       _isCheckingEnvironment = true;
@@ -219,8 +192,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
     try {
       final service = EnvironmentCheckService(
-        projectRootPath:
-            enteredPath.isEmpty ? null : enteredPath,
+        projectRootPath: enteredPath.isEmpty ? null : enteredPath,
       );
 
       final report = await service.run();
@@ -232,9 +204,7 @@ class _SettingsPageState extends State<SettingsPage> {
       await showDialog<void>(
         context: context,
         builder: (context) {
-          return _EnvironmentCheckDialog(
-            report: report,
-          );
+          return _EnvironmentCheckDialog(report: report);
         },
       );
     } catch (error) {
@@ -242,10 +212,7 @@ class _SettingsPageState extends State<SettingsPage> {
         return;
       }
 
-      await _showMessage(
-        title: '環境診断を実行できませんでした',
-        message: error.toString(),
-      );
+      await _showMessage(title: '環境診断を実行できませんでした', message: error.toString());
     } finally {
       if (mounted) {
         setState(() {
@@ -255,10 +222,7 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  Future<void> _showMessage({
-    required String title,
-    required String message,
-  }) {
+  Future<void> _showMessage({required String title, required String message}) {
     return showDialog<void>(
       context: context,
       builder: (context) {
@@ -280,8 +244,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final controlsDisabled =
-        _isSaving || _isCheckingEnvironment;
+    final controlsDisabled = _isSaving || _isCheckingEnvironment;
 
     return Scaffold(
       appBar: AppBar(
@@ -293,25 +256,16 @@ class _SettingsPageState extends State<SettingsPage> {
                 ? const SizedBox(
                     width: 18,
                     height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                    ),
+                    child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.save_outlined),
-            label: Text(
-              _isSaving ? '保存中' : '保存',
-            ),
+            label: Text(_isSaving ? '保存中' : '保存'),
           ),
           const SizedBox(width: 8),
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(
-          20,
-          16,
-          20,
-          32,
-        ),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
         children: [
           _SectionCard(
             title: '施設情報',
@@ -353,8 +307,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 decoration: const InputDecoration(
                   labelText: 'タイムゾーン',
                   hintText: 'Asia/Tokyo',
-                  helperText:
-                      '日本の施設はAsia/Tokyoのままで大丈夫です。',
+                  helperText: '日本の施設はAsia/Tokyoのままで大丈夫です。',
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -371,34 +324,25 @@ class _SettingsPageState extends State<SettingsPage> {
                 decoration: const InputDecoration(
                   labelText: 'JamooManager保存場所',
                   hintText: r'C:\work\JamooManager',
-                  helperText:
-                      '空欄の場合はアプリが自動で探します。',
+                  helperText: '空欄の場合はアプリが自動で探します。',
                   border: OutlineInputBorder(),
-                  prefixIcon: Icon(
-                    Icons.folder_open_outlined,
-                  ),
+                  prefixIcon: Icon(Icons.folder_open_outlined),
                 ),
               ),
               const SizedBox(height: 12),
               Align(
                 alignment: Alignment.centerLeft,
                 child: OutlinedButton.icon(
-                  onPressed: controlsDisabled
-                      ? null
-                      : _useCurrentProjectPath,
+                  onPressed: controlsDisabled ? null : _useCurrentProjectPath,
                   icon: const Icon(Icons.home_work_outlined),
-                  label: const Text(
-                    r'C:\work\JamooManager を入力',
-                  ),
+                  label: const Text(r'C:\work\JamooManager を入力'),
                 ),
               ),
               const SizedBox(height: 8),
               Text(
                 '別のPCや別の宿へ配布する場合は、'
                 'そのPCに保存したJamooManagerフォルダを入力します。',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall,
+                style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
           ),
@@ -413,25 +357,15 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               const SizedBox(height: 14),
               FilledButton.icon(
-                onPressed: controlsDisabled
-                    ? null
-                    : _runEnvironmentCheck,
+                onPressed: controlsDisabled ? null : _runEnvironmentCheck,
                 icon: _isCheckingEnvironment
                     ? const SizedBox(
                         width: 18,
                         height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                        ),
+                        child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(
-                        Icons.fact_check_outlined,
-                      ),
-                label: Text(
-                  _isCheckingEnvironment
-                      ? '診断中'
-                      : '環境を診断',
-                ),
+                    : const Icon(Icons.fact_check_outlined),
+                label: Text(_isCheckingEnvironment ? '診断中' : '環境を診断'),
               ),
             ],
           ),
@@ -443,9 +377,7 @@ class _SettingsPageState extends State<SettingsPage> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('予約金額を表示'),
-                subtitle: const Text(
-                  '予約カードと合計金額に料金を表示します。',
-                ),
+                subtitle: const Text('予約カードと合計金額に料金を表示します。'),
                 value: _showPrice,
                 onChanged: controlsDisabled
                     ? null
@@ -459,9 +391,7 @@ class _SettingsPageState extends State<SettingsPage> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('予約番号を表示'),
-                subtitle: const Text(
-                  '予約カードにBooking.comの予約番号を表示します。',
-                ),
+                subtitle: const Text('予約カードにBooking.comの予約番号を表示します。'),
                 value: _showReservationNumber,
                 onChanged: controlsDisabled
                     ? null
@@ -475,9 +405,7 @@ class _SettingsPageState extends State<SettingsPage> {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('到着予定時刻を表示'),
-                subtitle: const Text(
-                  '予約カードにお客様の到着予定時刻を表示します。',
-                ),
+                subtitle: const Text('予約カードにお客様の到着予定時刻を表示します。'),
                 value: _showArrivalTime,
                 onChanged: controlsDisabled
                     ? null
@@ -499,26 +427,20 @@ class _SettingsPageState extends State<SettingsPage> {
                   const SizedBox(width: 12),
                   const Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           '初期設定に戻す',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                          ),
+                          style: TextStyle(fontWeight: FontWeight.w600),
                         ),
                         SizedBox(height: 4),
-                        Text(
-                          '入力内容をVegetarian House Jamooの初期状態へ戻します。',
-                        ),
+                        Text('入力内容をVegetarian House Jamooの初期状態へ戻します。'),
                       ],
                     ),
                   ),
                   const SizedBox(width: 12),
                   OutlinedButton(
-                    onPressed:
-                        controlsDisabled ? null : _reset,
+                    onPressed: controlsDisabled ? null : _reset,
                     child: const Text('戻す'),
                   ),
                 ],
@@ -532,9 +454,7 @@ class _SettingsPageState extends State<SettingsPage> {
 }
 
 class _EnvironmentCheckDialog extends StatelessWidget {
-  const _EnvironmentCheckDialog({
-    required this.report,
-  });
+  const _EnvironmentCheckDialog({required this.report});
 
   final EnvironmentCheckReport report;
 
@@ -543,8 +463,8 @@ class _EnvironmentCheckDialog extends StatelessWidget {
     final summary = report.hasErrors
         ? 'エラー ${report.errorCount}件'
         : report.hasWarnings
-            ? '注意 ${report.warningCount}件'
-            : 'すべて正常です';
+        ? '注意 ${report.warningCount}件'
+        : 'すべて正常です';
 
     return AlertDialog(
       title: const Text('環境診断結果'),
@@ -552,14 +472,10 @@ class _EnvironmentCheckDialog extends StatelessWidget {
         width: 720,
         child: SingleChildScrollView(
           child: Column(
-            crossAxisAlignment:
-                CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              _EnvironmentSummary(
-                report: report,
-                summary: summary,
-              ),
+              _EnvironmentSummary(report: report, summary: summary),
               const SizedBox(height: 14),
               for (final item in report.items) ...[
                 _EnvironmentCheckRow(item: item),
@@ -582,10 +498,7 @@ class _EnvironmentCheckDialog extends StatelessWidget {
 }
 
 class _EnvironmentSummary extends StatelessWidget {
-  const _EnvironmentSummary({
-    required this.report,
-    required this.summary,
-  });
+  const _EnvironmentSummary({required this.report, required this.summary});
 
   final EnvironmentCheckReport report;
   final String summary;
@@ -595,11 +508,10 @@ class _EnvironmentSummary extends StatelessWidget {
     final status = report.hasErrors
         ? EnvironmentCheckStatus.error
         : report.hasWarnings
-            ? EnvironmentCheckStatus.warning
-            : EnvironmentCheckStatus.ok;
+        ? EnvironmentCheckStatus.warning
+        : EnvironmentCheckStatus.ok;
 
-    final presentation =
-        _statusPresentation(context, status);
+    final presentation = _statusPresentation(context, status);
 
     return Container(
       width: double.infinity,
@@ -610,10 +522,7 @@ class _EnvironmentSummary extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(
-            presentation.icon,
-            color: presentation.foregroundColor,
-          ),
+          Icon(presentation.icon, color: presentation.foregroundColor),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -631,46 +540,35 @@ class _EnvironmentSummary extends StatelessWidget {
 }
 
 class _EnvironmentCheckRow extends StatelessWidget {
-  const _EnvironmentCheckRow({
-    required this.item,
-  });
+  const _EnvironmentCheckRow({required this.item});
 
   final EnvironmentCheckItem item;
 
   @override
   Widget build(BuildContext context) {
-    final presentation =
-        _statusPresentation(context, item.status);
+    final presentation = _statusPresentation(context, item.status);
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         border: Border.all(
-          color: presentation.foregroundColor
-              .withValues(alpha: 0.35),
+          color: presentation.foregroundColor.withValues(alpha: 0.35),
         ),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            presentation.icon,
-            color: presentation.foregroundColor,
-          ),
+          Icon(presentation.icon, color: presentation.foregroundColor),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   item.label,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 4),
                 SelectableText(item.message),
@@ -687,32 +585,26 @@ _StatusPresentation _statusPresentation(
   BuildContext context,
   EnvironmentCheckStatus status,
 ) {
-  final colorScheme =
-      Theme.of(context).colorScheme;
+  final colorScheme = Theme.of(context).colorScheme;
 
   switch (status) {
     case EnvironmentCheckStatus.ok:
       return _StatusPresentation(
         icon: Icons.check_circle_outline,
         foregroundColor: colorScheme.primary,
-        backgroundColor:
-            colorScheme.primaryContainer,
+        backgroundColor: colorScheme.primaryContainer,
       );
     case EnvironmentCheckStatus.warning:
       return _StatusPresentation(
         icon: Icons.warning_amber_rounded,
-        foregroundColor:
-            colorScheme.onTertiaryContainer,
-        backgroundColor:
-            colorScheme.tertiaryContainer,
+        foregroundColor: colorScheme.onTertiaryContainer,
+        backgroundColor: colorScheme.tertiaryContainer,
       );
     case EnvironmentCheckStatus.error:
       return _StatusPresentation(
         icon: Icons.error_outline,
-        foregroundColor:
-            colorScheme.onErrorContainer,
-        backgroundColor:
-            colorScheme.errorContainer,
+        foregroundColor: colorScheme.onErrorContainer,
+        backgroundColor: colorScheme.errorContainer,
       );
   }
 }
@@ -746,24 +638,13 @@ class _SectionCard extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                Icon(
-                  icon,
-                  color: Theme.of(context)
-                      .colorScheme
-                      .primary,
-                ),
+                Icon(icon, color: Theme.of(context).colorScheme.primary),
                 const SizedBox(width: 8),
-                Text(
-                  title,
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium,
-                ),
+                Text(title, style: Theme.of(context).textTheme.titleMedium),
               ],
             ),
             const SizedBox(height: 18),

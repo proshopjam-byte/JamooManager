@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 
 $repoRoot = $PSScriptRoot
 $appRoot = Join-Path $repoRoot "jamoo_app"
@@ -88,6 +88,7 @@ Write-Host "CHILLNN取得ファイルをコピーしています..."
 
 $chillnnFiles = @(
 "fetch_chillnn.py",
+    "fetch_portals.py",
 "requirements.txt"
 )
 

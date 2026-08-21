@@ -270,9 +270,7 @@ class DatabaseService {
     ''');
   }
 
-  static Future<void> _createCheckinSheetRowsTable(
-    DatabaseExecutor db,
-  ) async {
+  static Future<void> _createCheckinSheetRowsTable(DatabaseExecutor db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS checkin_sheet_rows (
         sheet_date TEXT NOT NULL,

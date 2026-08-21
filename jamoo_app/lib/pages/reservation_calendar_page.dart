@@ -315,23 +315,27 @@ class _MonthCalendar extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '${visibleMonth.year}年 ${visibleMonth.month}月',
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
-                ),
-                const _LegendDot(color: Color(0xFF386641), label: 'CHILLNN'),
-                const SizedBox(width: 14),
-                const _LegendDot(
-                  color: Color(0xFF1565C0),
-                  label: 'Booking.com',
-                ),
-                const SizedBox(width: 14),
-                const _LegendDot(color: Color(0xFFEF6C00), label: '直接予約'),
-              ],
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '${visibleMonth.year}年 ${visibleMonth.month}月',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(
+                spacing: 14,
+                runSpacing: 6,
+                children: [
+                  _LegendDot(color: Color(0xFF386641), label: 'CHILLNN'),
+                  _LegendDot(color: Color(0xFF1565C0), label: 'Booking.com'),
+                  _LegendDot(color: Color(0xFFBF0000), label: '楽天トラベル'),
+                  _LegendDot(color: Color(0xFFE91E63), label: 'じゃらん'),
+                  _LegendDot(color: Color(0xFFEF6C00), label: '直接予約'),
+                ],
+              ),
             ),
             const SizedBox(height: 12),
             _MonthlySalesSummary(
@@ -502,10 +506,13 @@ class _CalendarDay extends StatelessWidget {
         .where((reservation) => reservation.source.toUpperCase() == 'MANUAL')
         .fold<int>(0, (sum, reservation) => sum + reservation.roomCount);
     final bookingCount = reservations
-        .where((reservation) {
-          final source = reservation.source.toUpperCase();
-          return source != 'CHILLNN' && source != 'MANUAL';
-        })
+        .where((reservation) => _sourceType(reservation.source) == 'booking')
+        .fold<int>(0, (sum, reservation) => sum + reservation.roomCount);
+    final rakutenCount = reservations
+        .where((reservation) => _sourceType(reservation.source) == 'rakuten')
+        .fold<int>(0, (sum, reservation) => sum + reservation.roomCount);
+    final jalanCount = reservations
+        .where((reservation) => _sourceType(reservation.source) == 'jalan')
         .fold<int>(0, (sum, reservation) => sum + reservation.roomCount);
     final breakfastGuests = reservations
         .where((reservation) => reservation.hasBreakfast == true)
@@ -585,6 +592,22 @@ class _CalendarDay extends StatelessWidget {
                 child: _CountBadge(
                   color: const Color(0xFF1565C0),
                   count: bookingCount,
+                ),
+              ),
+            if (rakutenCount > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: _CountBadge(
+                  color: const Color(0xFFBF0000),
+                  count: rakutenCount,
+                ),
+              ),
+            if (jalanCount > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: _CountBadge(
+                  color: const Color(0xFFE91E63),
+                  count: jalanCount,
                 ),
               ),
             if (manualCount > 0)
@@ -855,13 +878,9 @@ class _ReservationTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isChillnn = reservation.source.toUpperCase() == 'CHILLNN';
-    final isManual = reservation.source.toUpperCase() == 'MANUAL';
-    final sourceColor = isManual
-        ? const Color(0xFFEF6C00)
-        : isChillnn
-        ? const Color(0xFF386641)
-        : const Color(0xFF1565C0);
+    final sourceType = _sourceType(reservation.source);
+    final isManual = sourceType == 'manual';
+    final sourceColor = _sourceColor(sourceType);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -883,7 +902,7 @@ class _ReservationTile extends StatelessWidget {
                 ),
               ),
               Text(
-                isManual ? '直接予約' : reservation.source,
+                _sourceLabel(sourceType, reservation.source),
                 style: TextStyle(
                   color: sourceColor,
                   fontWeight: FontWeight.bold,
@@ -1001,6 +1020,50 @@ class _Weekday extends StatelessWidget {
         style: TextStyle(color: color, fontWeight: FontWeight.bold),
       ),
     );
+  }
+}
+
+String _sourceType(String source) {
+  final normalized = source.trim().toLowerCase();
+  if (normalized == 'manual') return 'manual';
+  if (normalized == 'chillnn') return 'chillnn';
+  if (normalized.contains('rakuten') || normalized.contains('楽天')) {
+    return 'rakuten';
+  }
+  if (normalized.contains('jalan') || normalized.contains('じゃらん')) {
+    return 'jalan';
+  }
+  if (normalized.contains('booking')) return 'booking';
+  return 'other';
+}
+
+Color _sourceColor(String sourceType) {
+  switch (sourceType) {
+    case 'manual':
+      return const Color(0xFFEF6C00);
+    case 'chillnn':
+      return const Color(0xFF386641);
+    case 'rakuten':
+      return const Color(0xFFBF0000);
+    case 'jalan':
+      return const Color(0xFFE91E63);
+    case 'booking':
+      return const Color(0xFF1565C0);
+    default:
+      return const Color(0xFF546E7A);
+  }
+}
+
+String _sourceLabel(String sourceType, String original) {
+  switch (sourceType) {
+    case 'manual':
+      return '直接予約';
+    case 'rakuten':
+      return '楽天トラベル';
+    case 'jalan':
+      return 'じゃらん';
+    default:
+      return original;
   }
 }
 

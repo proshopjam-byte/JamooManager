@@ -16,18 +16,14 @@ class BookingSyncService {
 
   Future<BookingSyncResult> run() async {
     if (!Platform.isWindows) {
-      throw const BookingSyncException(
-        'Booking.comの取得処理は現在Windows版のみ対応しています。',
-      );
+      throw const BookingSyncException('Booking.comの取得処理は現在Windows版のみ対応しています。');
     }
 
     final paths = await _resolvePaths();
 
     await _confirmNodeIsAvailable();
 
-    final previousSnapshot = await _readFileSnapshot(
-      paths.reservationJson,
-    );
+    final previousSnapshot = await _readFileSnapshot(paths.reservationJson);
 
     await _launchBookingPowerShell(
       bookingDirectory: paths.bookingBotDirectory,
@@ -47,9 +43,7 @@ class BookingSyncService {
 
   Future<AppPaths> _resolvePaths() async {
     try {
-      final paths = await AppPaths.resolve(
-        projectRootPath: projectRootPath,
-      );
+      final paths = await AppPaths.resolve(projectRootPath: projectRootPath);
 
       if (!await paths.bookingScriptExists()) {
         throw BookingSyncException(
@@ -73,11 +67,7 @@ class BookingSyncService {
 
   Future<void> _confirmNodeIsAvailable() async {
     try {
-      final result = await Process.run(
-        'where.exe',
-        ['node'],
-        runInShell: true,
-      );
+      final result = await Process.run('where.exe', ['node'], runInShell: true);
 
       if (result.exitCode != 0) {
         throw const BookingSyncException(
@@ -88,9 +78,7 @@ class BookingSyncService {
     } on BookingSyncException {
       rethrow;
     } on ProcessException catch (error) {
-      throw BookingSyncException(
-        'Node.jsの確認に失敗しました。\n${error.message}',
-      );
+      throw BookingSyncException('Node.jsの確認に失敗しました。\n${error.message}');
     }
   }
 
@@ -98,9 +86,7 @@ class BookingSyncService {
     required Directory bookingDirectory,
     required File bookingScript,
   }) async {
-    final escapedDirectory = _escapePowerShellLiteral(
-      bookingDirectory.path,
-    );
+    final escapedDirectory = _escapePowerShellLiteral(bookingDirectory.path);
 
     final scriptName = _escapePowerShellLiteral(
       bookingScript.path.split(Platform.pathSeparator).last,
@@ -157,9 +143,7 @@ class BookingSyncService {
     while (stopwatch.elapsed < timeout) {
       await Future<void>.delayed(pollInterval);
 
-      final currentSnapshot = await _readFileSnapshot(
-        jsonFile,
-      );
+      final currentSnapshot = await _readFileSnapshot(jsonFile);
 
       if (currentSnapshot == null) {
         continue;
@@ -167,9 +151,7 @@ class BookingSyncService {
 
       if (previousSnapshot == null ||
           currentSnapshot.content != previousSnapshot.content ||
-          currentSnapshot.modifiedAt.isAfter(
-            previousSnapshot.modifiedAt,
-          )) {
+          currentSnapshot.modifiedAt.isAfter(previousSnapshot.modifiedAt)) {
         return currentSnapshot;
       }
     }
@@ -182,9 +164,7 @@ class BookingSyncService {
     );
   }
 
-  Future<_FileSnapshot?> _readFileSnapshot(
-    File file,
-  ) async {
+  Future<_FileSnapshot?> _readFileSnapshot(File file) async {
     if (!await file.exists()) {
       return null;
     }
@@ -203,9 +183,7 @@ class BookingSyncService {
     }
   }
 
-  static String _escapePowerShellLiteral(
-    String value,
-  ) {
+  static String _escapePowerShellLiteral(String value) {
     return value.replaceAll("'", "''");
   }
 }
@@ -230,10 +208,7 @@ class BookingSyncException implements Exception {
 }
 
 class _FileSnapshot {
-  const _FileSnapshot({
-    required this.modifiedAt,
-    required this.content,
-  });
+  const _FileSnapshot({required this.modifiedAt, required this.content});
 
   final DateTime modifiedAt;
   final String content;
