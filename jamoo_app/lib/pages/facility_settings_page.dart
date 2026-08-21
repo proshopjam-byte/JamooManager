@@ -21,6 +21,8 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
   late final TextEditingController _addressController;
   late final TextEditingController _phoneController;
   late List<_RoomEditor> _rooms;
+  late Map<String, _RoomRateEditor> _rateEditors;
+  late _PersonRatesEditor _personRatesEditor;
   bool _saving = false;
 
   @override
@@ -36,6 +38,17 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
     _addressController = TextEditingController(text: settings.address);
     _phoneController = TextEditingController(text: settings.phone);
     _rooms = settings.rooms.map(_RoomEditor.fromRoom).toList();
+    _personRatesEditor = _PersonRatesEditor.fromSettings(settings.personRates);
+    _rateEditors = {
+      for (final rate in settings.roomRates)
+        _roomTypeKey(rate.roomTypeName): _RoomRateEditor.fromRate(
+          rate,
+          defaultMinimumGuests: _defaultMinimumGuests(rate.roomTypeName),
+          defaultSingleUseSurchargeYen: _defaultSingleUseSurcharge(
+            rate.roomTypeName,
+          ),
+        ),
+    };
   }
 
   @override
@@ -46,6 +59,10 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
     for (final room in _rooms) {
       room.dispose();
     }
+    for (final rate in _rateEditors.values) {
+      rate.dispose();
+    }
+    _personRatesEditor.dispose();
     super.dispose();
   }
 
@@ -65,6 +82,10 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
       _showMessage('客室を1室以上登録してください。');
       return;
     }
+    if (_rooms.length > 10) {
+      _showMessage('客室は10室まで登録できます。');
+      return;
+    }
 
     final rooms = _rooms.map((editor) => editor.toRoom()).toList()
       ..sort((first, second) => first.number.compareTo(second.number));
@@ -73,6 +94,14 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
       address: _addressController.text.trim(),
       phone: _phoneController.text.trim(),
       rooms: List.unmodifiable(rooms),
+      roomRates: List.unmodifiable(
+        _currentRoomTypes().map((definition) {
+          return _rateEditorFor(
+            definition.name,
+          ).toRate(definition.name, definition.maximumGuests);
+        }),
+      ),
+      personRates: _personRatesEditor.toSettings(),
     );
 
     setState(() {
@@ -96,6 +125,10 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
   }
 
   void _addRoom() {
+    if (_rooms.length >= 10) {
+      _showMessage('客室は10室まで追加できます。');
+      return;
+    }
     final used = _rooms
         .map((room) => int.tryParse(room.numberController.text.trim()) ?? 0)
         .toSet();
@@ -157,10 +190,27 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
     for (final room in _rooms) {
       room.dispose();
     }
+    for (final rate in _rateEditors.values) {
+      rate.dispose();
+    }
+    _personRatesEditor.dispose();
     setState(() {
       _rooms = FacilitySettings.defaults.rooms
           .map(_RoomEditor.fromRoom)
           .toList();
+      _rateEditors = {
+        for (final rate in FacilitySettings.defaults.roomRates)
+          _roomTypeKey(rate.roomTypeName): _RoomRateEditor.fromRate(
+            rate,
+            defaultMinimumGuests: _defaultMinimumGuests(rate.roomTypeName),
+            defaultSingleUseSurchargeYen: _defaultSingleUseSurcharge(
+              rate.roomTypeName,
+            ),
+          ),
+      };
+      _personRatesEditor = _PersonRatesEditor.fromSettings(
+        FacilitySettings.defaults.personRates,
+      );
     });
   }
 
@@ -251,9 +301,9 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
                   ),
                 ),
                 OutlinedButton.icon(
-                  onPressed: _saving ? null : _addRoom,
+                  onPressed: _saving || _rooms.length >= 10 ? null : _addRoom,
                   icon: const Icon(Icons.add),
-                  label: const Text('客室を追加'),
+                  label: Text('客室を追加（${_rooms.length}/10）'),
                 ),
               ],
             ),
@@ -265,6 +315,8 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
             const SizedBox(height: 12),
             for (var index = 0; index < _rooms.length; index++)
               _buildRoomCard(index),
+            const SizedBox(height: 24),
+            _buildRateSettings(),
           ],
         ),
       ),
@@ -304,7 +356,7 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
                     child: DropdownButtonFormField<GuestRoomType>(
                       initialValue: room.type,
                       decoration: const InputDecoration(
-                        labelText: '部屋種類',
+                        labelText: '自動部屋割り分類',
                         border: OutlineInputBorder(),
                       ),
                       items: [
@@ -328,9 +380,10 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
                     child: TextFormField(
                       controller: room.labelController,
                       decoration: const InputDecoration(
-                        labelText: '表示名',
+                        labelText: '部屋タイプ名（自由入力）',
                         border: OutlineInputBorder(),
                       ),
+                      onChanged: (_) => setState(() {}),
                       validator: (value) =>
                           value?.trim().isEmpty == true ? '表示名を入力' : null,
                     ),
@@ -371,6 +424,7 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
                         suffixText: '名',
                         border: OutlineInputBorder(),
                       ),
+                      onChanged: (_) => setState(() {}),
                       validator: _positiveIntegerValidator,
                     ),
                   ),
@@ -403,6 +457,259 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
       return '1以上の数字';
     }
     return null;
+  }
+
+  Widget _buildRateSettings() {
+    final definitions = _currentRoomTypes();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('料金設定', style: Theme.of(context).textTheme.titleLarge),
+        const SizedBox(height: 4),
+        const Text(
+          '1名料金と客室別ルールから直接予約の金額を自動計算します。'
+          '人数別の1室合計料金を入力した場合は、大人だけの予約でそちらを優先します。',
+        ),
+        const SizedBox(height: 12),
+        _buildPersonRateCard(),
+        const SizedBox(height: 12),
+        if (definitions.isEmpty)
+          const Text('使用可能な客室タイプを登録してください。')
+        else
+          for (final definition in definitions) _buildRateCard(definition),
+      ],
+    );
+  }
+
+  Widget _buildPersonRateCard() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('1名・1泊料金', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            const Text('子ども料金は10歳以下を想定しています。'),
+            const SizedBox(height: 8),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                columnSpacing: 18,
+                columns: const [
+                  DataColumn(label: Text('区分')),
+                  DataColumn(label: Text('素泊まり')),
+                  DataColumn(label: Text('朝食付き')),
+                  DataColumn(label: Text('2食付き')),
+                ],
+                rows: [
+                  _personRateDataRow('大人', _personRatesEditor.adult),
+                  _personRateDataRow(
+                    '子ども・ベッドあり',
+                    _personRatesEditor.childWithBed,
+                  ),
+                  _personRateDataRow(
+                    '子ども・ベッドなし',
+                    _personRatesEditor.childWithoutBed,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  DataRow _personRateDataRow(String label, _PersonPlanRateEditor editor) {
+    return DataRow(
+      cells: [
+        DataCell(Text(label)),
+        DataCell(_rateField(editor.roomOnlyController)),
+        DataCell(_rateField(editor.breakfastController)),
+        DataCell(_rateField(editor.twoMealsController)),
+      ],
+    );
+  }
+
+  Widget _buildRateCard(_RoomTypeDefinition definition) {
+    final editor = _rateEditorFor(definition.name);
+    editor.ensureGuestCount(definition.maximumGuests);
+    final enteredMinimum = int.tryParse(
+      editor.minimumGuestsController.text.trim(),
+    );
+    final minimumGuests = (enteredMinimum ?? 1)
+        .clamp(1, definition.maximumGuests)
+        .toInt();
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${definition.name}（最大${definition.maximumGuests}名）',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                SizedBox(
+                  width: 180,
+                  child: TextFormField(
+                    controller: editor.minimumGuestsController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: '最低利用人数',
+                      suffixText: '名',
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                    validator: (value) {
+                      final error = _positiveIntegerValidator(value);
+                      if (error != null) return error;
+                      final minimum = int.parse(value!.trim());
+                      return minimum > definition.maximumGuests
+                          ? '最大定員以下にする'
+                          : null;
+                    },
+                  ),
+                ),
+                SizedBox(
+                  width: 240,
+                  child: TextFormField(
+                    controller: editor.singleUseSurchargeController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: '1名利用時の加算',
+                      suffixText: '円',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: _optionalMoneyValidator,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text('以下の「1室・1泊合計料金」は任意です。'),
+            const SizedBox(height: 4),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: DataTable(
+                columnSpacing: 18,
+                columns: const [
+                  DataColumn(label: Text('人数')),
+                  DataColumn(label: Text('素泊まり')),
+                  DataColumn(label: Text('朝食付き')),
+                  DataColumn(label: Text('2食付き')),
+                ],
+                rows: [
+                  for (
+                    var guestCount = minimumGuests;
+                    guestCount <= definition.maximumGuests;
+                    guestCount++
+                  )
+                    _rateDataRow(editor.rowFor(guestCount)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  DataRow _rateDataRow(_RateRowEditor row) {
+    return DataRow(
+      cells: [
+        DataCell(Text('${row.guestCount}名')),
+        DataCell(_rateField(row.roomOnlyController)),
+        DataCell(_rateField(row.breakfastController)),
+        DataCell(_rateField(row.twoMealsController)),
+      ],
+    );
+  }
+
+  Widget _rateField(TextEditingController controller) {
+    return SizedBox(
+      width: 130,
+      child: TextFormField(
+        controller: controller,
+        keyboardType: TextInputType.number,
+        decoration: const InputDecoration(
+          suffixText: '円',
+          isDense: true,
+          border: OutlineInputBorder(),
+        ),
+        validator: _optionalMoneyValidator,
+      ),
+    );
+  }
+
+  List<_RoomTypeDefinition> _currentRoomTypes() {
+    final definitions = <String, _RoomTypeDefinition>{};
+    for (final room in _rooms) {
+      if (!room.isAvailable) continue;
+      final name = room.labelController.text.trim();
+      final maximum = int.tryParse(room.capacityController.text.trim());
+      if (name.isEmpty || maximum == null || maximum <= 0) continue;
+      final key = _roomTypeKey(name);
+      final existing = definitions[key];
+      if (existing == null || maximum > existing.maximumGuests) {
+        definitions[key] = _RoomTypeDefinition(
+          name: existing?.name ?? name,
+          maximumGuests: maximum,
+        );
+      }
+    }
+    final result = definitions.values.toList();
+    result.sort((first, second) => first.name.compareTo(second.name));
+    return result;
+  }
+
+  _RoomRateEditor _rateEditorFor(String roomTypeName) {
+    return _rateEditors.putIfAbsent(
+      _roomTypeKey(roomTypeName),
+      () => _RoomRateEditor(
+        defaultMinimumGuests: _defaultMinimumGuests(roomTypeName),
+        defaultSingleUseSurchargeYen: _defaultSingleUseSurcharge(roomTypeName),
+      ),
+    );
+  }
+
+  GuestRoomType? _roomClassification(String roomTypeName) {
+    final key = _roomTypeKey(roomTypeName);
+    for (final room in _rooms) {
+      if (room.isAvailable && _roomTypeKey(room.labelController.text) == key) {
+        return room.type;
+      }
+    }
+    return null;
+  }
+
+  int _defaultMinimumGuests(String roomTypeName) {
+    return _roomClassification(roomTypeName) == GuestRoomType.loft ? 3 : 1;
+  }
+
+  int _defaultSingleUseSurcharge(String roomTypeName) {
+    return _roomClassification(roomTypeName) == GuestRoomType.standardTwin
+        ? 3000
+        : 0;
+  }
+
+  static String? _optionalMoneyValidator(String? value) {
+    final text = value?.replaceAll(',', '').trim() ?? '';
+    if (text.isEmpty) return null;
+    final parsed = int.tryParse(text);
+    if (parsed == null || parsed < 0) return '0以上の数字';
+    return null;
+  }
+
+  static String _roomTypeKey(String value) {
+    return value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '');
   }
 }
 
@@ -452,5 +759,201 @@ class _RoomEditor {
     labelController.dispose();
     normalCapacityController.dispose();
     capacityController.dispose();
+  }
+}
+
+class _RoomTypeDefinition {
+  const _RoomTypeDefinition({required this.name, required this.maximumGuests});
+
+  final String name;
+  final int maximumGuests;
+}
+
+class _RoomRateEditor {
+  _RoomRateEditor({
+    required int defaultMinimumGuests,
+    required int defaultSingleUseSurchargeYen,
+  }) : minimumGuestsController = TextEditingController(
+         text: '$defaultMinimumGuests',
+       ),
+       singleUseSurchargeController = TextEditingController(
+         text: '$defaultSingleUseSurchargeYen',
+       );
+
+  factory _RoomRateEditor.fromRate(
+    RoomTypeRate rate, {
+    required int defaultMinimumGuests,
+    required int defaultSingleUseSurchargeYen,
+  }) {
+    final editor = _RoomRateEditor(
+      defaultMinimumGuests: rate.minimumGuests ?? defaultMinimumGuests,
+      defaultSingleUseSurchargeYen:
+          rate.singleUseSurchargeYen ?? defaultSingleUseSurchargeYen,
+    );
+    for (final guestRate in rate.rates) {
+      editor._rows[guestRate.guestCount] = _RateRowEditor.fromRate(guestRate);
+    }
+    return editor;
+  }
+
+  final Map<int, _RateRowEditor> _rows = {};
+  final TextEditingController minimumGuestsController;
+  final TextEditingController singleUseSurchargeController;
+
+  void ensureGuestCount(int maximumGuests) {
+    for (var guestCount = 1; guestCount <= maximumGuests; guestCount++) {
+      _rows.putIfAbsent(guestCount, () => _RateRowEditor(guestCount));
+    }
+  }
+
+  _RateRowEditor rowFor(int guestCount) {
+    return _rows.putIfAbsent(guestCount, () => _RateRowEditor(guestCount));
+  }
+
+  RoomTypeRate toRate(String roomTypeName, int maximumGuests) {
+    ensureGuestCount(maximumGuests);
+    return RoomTypeRate(
+      roomTypeName: roomTypeName,
+      minimumGuests: int.tryParse(minimumGuestsController.text.trim()),
+      singleUseSurchargeYen: _RateRowEditor._readMoney(
+        singleUseSurchargeController.text,
+      ),
+      rates: List.unmodifiable([
+        for (var guestCount = 1; guestCount <= maximumGuests; guestCount++)
+          rowFor(guestCount).toRate(),
+      ]),
+    );
+  }
+
+  void dispose() {
+    for (final row in _rows.values) {
+      row.dispose();
+    }
+    minimumGuestsController.dispose();
+    singleUseSurchargeController.dispose();
+  }
+}
+
+class _PersonRatesEditor {
+  _PersonRatesEditor({
+    required this.adult,
+    required this.childWithBed,
+    required this.childWithoutBed,
+  });
+
+  factory _PersonRatesEditor.fromSettings(PersonRateSettings settings) {
+    return _PersonRatesEditor(
+      adult: _PersonPlanRateEditor.fromRate(settings.adult),
+      childWithBed: _PersonPlanRateEditor.fromRate(settings.childWithBed),
+      childWithoutBed: _PersonPlanRateEditor.fromRate(settings.childWithoutBed),
+    );
+  }
+
+  final _PersonPlanRateEditor adult;
+  final _PersonPlanRateEditor childWithBed;
+  final _PersonPlanRateEditor childWithoutBed;
+
+  PersonRateSettings toSettings() => PersonRateSettings(
+    adult: adult.toRate(),
+    childWithBed: childWithBed.toRate(),
+    childWithoutBed: childWithoutBed.toRate(),
+  );
+
+  void dispose() {
+    adult.dispose();
+    childWithBed.dispose();
+    childWithoutBed.dispose();
+  }
+}
+
+class _PersonPlanRateEditor {
+  _PersonPlanRateEditor({
+    required this.roomOnlyController,
+    required this.breakfastController,
+    required this.twoMealsController,
+  });
+
+  factory _PersonPlanRateEditor.fromRate(PersonPlanRate rate) {
+    return _PersonPlanRateEditor(
+      roomOnlyController: TextEditingController(
+        text: rate.roomOnlyYen?.toString() ?? '',
+      ),
+      breakfastController: TextEditingController(
+        text: rate.breakfastYen?.toString() ?? '',
+      ),
+      twoMealsController: TextEditingController(
+        text: rate.twoMealsYen?.toString() ?? '',
+      ),
+    );
+  }
+
+  final TextEditingController roomOnlyController;
+  final TextEditingController breakfastController;
+  final TextEditingController twoMealsController;
+
+  PersonPlanRate toRate() => PersonPlanRate(
+    roomOnlyYen: _RateRowEditor._readMoney(roomOnlyController.text),
+    breakfastYen: _RateRowEditor._readMoney(breakfastController.text),
+    twoMealsYen: _RateRowEditor._readMoney(twoMealsController.text),
+  );
+
+  void dispose() {
+    roomOnlyController.dispose();
+    breakfastController.dispose();
+    twoMealsController.dispose();
+  }
+}
+
+class _RateRowEditor {
+  _RateRowEditor(this.guestCount)
+    : roomOnlyController = TextEditingController(),
+      breakfastController = TextEditingController(),
+      twoMealsController = TextEditingController();
+
+  factory _RateRowEditor.fromRate(GuestCountRate rate) {
+    return _RateRowEditor._(
+      rate.guestCount,
+      roomOnlyController: TextEditingController(
+        text: rate.roomOnlyYen?.toString() ?? '',
+      ),
+      breakfastController: TextEditingController(
+        text: rate.breakfastYen?.toString() ?? '',
+      ),
+      twoMealsController: TextEditingController(
+        text: rate.twoMealsYen?.toString() ?? '',
+      ),
+    );
+  }
+
+  _RateRowEditor._(
+    this.guestCount, {
+    required this.roomOnlyController,
+    required this.breakfastController,
+    required this.twoMealsController,
+  });
+
+  final int guestCount;
+  final TextEditingController roomOnlyController;
+  final TextEditingController breakfastController;
+  final TextEditingController twoMealsController;
+
+  GuestCountRate toRate() {
+    return GuestCountRate(
+      guestCount: guestCount,
+      roomOnlyYen: _readMoney(roomOnlyController.text),
+      breakfastYen: _readMoney(breakfastController.text),
+      twoMealsYen: _readMoney(twoMealsController.text),
+    );
+  }
+
+  void dispose() {
+    roomOnlyController.dispose();
+    breakfastController.dispose();
+    twoMealsController.dispose();
+  }
+
+  static int? _readMoney(String value) {
+    final text = value.replaceAll(',', '').trim();
+    return text.isEmpty ? null : int.tryParse(text);
   }
 }

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../models/facility_settings.dart';
 import '../models/reservation.dart';
+import '../repositories/facility_settings_repository.dart';
 import '../widgets/postal_code_lookup_button.dart';
 
 class ManualReservationFormData {
@@ -10,7 +12,8 @@ class ManualReservationFormData {
     required this.checkOut,
     required this.roomName,
     required this.adults,
-    required this.children,
+    required this.childrenWithBed,
+    required this.childrenWithoutBed,
     required this.priceYen,
     required this.phone,
     required this.address,
@@ -25,7 +28,9 @@ class ManualReservationFormData {
   final DateTime checkOut;
   final String roomName;
   final int adults;
-  final int children;
+  final int childrenWithBed;
+  final int childrenWithoutBed;
+  int get children => childrenWithBed + childrenWithoutBed;
   final int? priceYen;
   final String? phone;
   final String? address;
@@ -112,21 +117,34 @@ Future<ManualReservationFormData?> showManualReservationDialog(
   BuildContext context, {
   required DateTime initialDate,
   Reservation? reservation,
-}) {
+}) async {
+  FacilitySettings settings;
+  try {
+    settings = await const FacilitySettingsRepository().load();
+  } catch (_) {
+    settings = FacilitySettings.defaults;
+  }
+  if (!context.mounted) return null;
   return showDialog<ManualReservationFormData>(
     context: context,
     barrierDismissible: false,
     builder: (context) => _ManualReservationDialog(
       initialDate: initialDate,
       reservation: reservation,
+      settings: settings,
     ),
   );
 }
 
 class _ManualReservationDialog extends StatefulWidget {
-  const _ManualReservationDialog({required this.initialDate, this.reservation});
+  const _ManualReservationDialog({
+    required this.initialDate,
+    required this.settings,
+    this.reservation,
+  });
 
   final DateTime initialDate;
+  final FacilitySettings settings;
   final Reservation? reservation;
 
   @override
@@ -137,9 +155,9 @@ class _ManualReservationDialog extends StatefulWidget {
 class _ManualReservationDialogState extends State<_ManualReservationDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _guestController;
-  late final TextEditingController _roomController;
   late final TextEditingController _adultsController;
-  late final TextEditingController _childrenController;
+  late final TextEditingController _childrenWithBedController;
+  late final TextEditingController _childrenWithoutBedController;
   late final TextEditingController _priceController;
   late final TextEditingController _phoneController;
   late final TextEditingController _postalCodeController;
@@ -147,8 +165,8 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
   late final TextEditingController _notesController;
   late DateTime _checkIn;
   late DateTime _checkOut;
-  late bool _hasBreakfast;
-  late bool _hasDinner;
+  late String _selectedRoomType;
+  late StayPlan _stayPlan;
 
   @override
   void initState() {
@@ -159,12 +177,23 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
     _guestController = TextEditingController(
       text: reservation?.guestName ?? '',
     );
-    _roomController = TextEditingController(text: reservation?.roomName ?? '');
+    final existingRoom = reservation?.roomName?.trim() ?? '';
+    final roomTypes = widget.settings.availableRoomTypeNames;
+    _selectedRoomType = existingRoom.isNotEmpty
+        ? existingRoom
+        : roomTypes.isNotEmpty
+        ? roomTypes.first
+        : 'その他';
     _adultsController = TextEditingController(
       text: '${reservation?.adults ?? 1}',
     );
-    _childrenController = TextEditingController(
-      text: '${reservation?.children ?? 0}',
+    final knownChildrenWithBed = reservation?.childrenWithBed;
+    final knownChildrenWithoutBed = reservation?.childrenWithoutBed;
+    _childrenWithBedController = TextEditingController(
+      text: '${knownChildrenWithBed ?? reservation?.children ?? 0}',
+    );
+    _childrenWithoutBedController = TextEditingController(
+      text: '${knownChildrenWithoutBed ?? 0}',
     );
     _priceController = TextEditingController(
       text: reservation?.priceYen?.toString() ?? '',
@@ -179,16 +208,19 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
     _notesController = TextEditingController(
       text: reservation?.specialRequests ?? '',
     );
-    _hasBreakfast = reservation?.hasBreakfast ?? false;
-    _hasDinner = reservation?.hasDinner ?? false;
+    _stayPlan = reservation?.hasDinner == true
+        ? StayPlan.twoMeals
+        : reservation?.hasBreakfast == true
+        ? StayPlan.breakfast
+        : StayPlan.roomOnly;
   }
 
   @override
   void dispose() {
     _guestController.dispose();
-    _roomController.dispose();
     _adultsController.dispose();
-    _childrenController.dispose();
+    _childrenWithBedController.dispose();
+    _childrenWithoutBedController.dispose();
     _priceController.dispose();
     _phoneController.dispose();
     _postalCodeController.dispose();
@@ -226,23 +258,93 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
       );
       return;
     }
+    final adults = int.parse(_adultsController.text);
+    final childrenWithBed = int.parse(_childrenWithBedController.text);
+    final childrenWithoutBed = int.parse(_childrenWithoutBedController.text);
+    final guests = adults + childrenWithBed + childrenWithoutBed;
+    if (guests <= 0) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('人数は1名以上にしてください。')));
+      return;
+    }
+    if (!_validateRoomOccupancy(guests)) return;
     Navigator.of(context).pop(
       ManualReservationFormData(
         guestName: _guestController.text.trim(),
         checkIn: _checkIn,
         checkOut: _checkOut,
-        roomName: _roomController.text.trim(),
-        adults: int.parse(_adultsController.text),
-        children: int.parse(_childrenController.text),
+        roomName: _selectedRoomType,
+        adults: adults,
+        childrenWithBed: childrenWithBed,
+        childrenWithoutBed: childrenWithoutBed,
         priceYen: int.tryParse(_priceController.text.replaceAll(',', '')),
         phone: _emptyToNull(_phoneController.text),
         address: _emptyToNull(_addressController.text),
         postalCode: _emptyToNull(_postalCodeController.text),
         notes: _emptyToNull(_notesController.text),
-        hasBreakfast: _hasBreakfast,
-        hasDinner: _hasDinner,
+        hasBreakfast: _stayPlan != StayPlan.roomOnly,
+        hasDinner: _stayPlan == StayPlan.twoMeals,
       ),
     );
+  }
+
+  void _calculatePrice() {
+    final adults = int.tryParse(_adultsController.text.trim()) ?? 0;
+    final childrenWithBed =
+        int.tryParse(_childrenWithBedController.text.trim()) ?? 0;
+    final childrenWithoutBed =
+        int.tryParse(_childrenWithoutBedController.text.trim()) ?? 0;
+    final guests = adults + childrenWithBed + childrenWithoutBed;
+    if (guests <= 0) {
+      _showMessage('先に人数を入力してください。');
+      return;
+    }
+    if (!_validateRoomOccupancy(guests)) return;
+    final nightlyRate = widget.settings.calculateNightlyRate(
+      roomTypeName: _selectedRoomType,
+      adults: adults,
+      childrenWithBed: childrenWithBed,
+      childrenWithoutBed: childrenWithoutBed,
+      plan: _stayPlan,
+    );
+    if (nightlyRate == null) {
+      _showMessage('この人数内訳・プランの料金が未設定です。');
+      return;
+    }
+    final nights = _checkOut.difference(_checkIn).inDays;
+    if (nights <= 0) {
+      _showMessage('先に宿泊日を確認してください。');
+      return;
+    }
+    setState(() {
+      _priceController.text = '${nightlyRate * nights}';
+    });
+    _showMessage(
+      '${_stayPlan.label}　大人$adults名・子ども（ベッドあり）'
+      '$childrenWithBed名・子ども（ベッドなし）$childrenWithoutBed名、'
+      '$nights泊で計算しました。',
+    );
+  }
+
+  bool _validateRoomOccupancy(int guests) {
+    final minimum = widget.settings.minimumGuestsFor(_selectedRoomType);
+    final maximum = widget.settings.maximumGuestsFor(_selectedRoomType);
+    if (guests < minimum) {
+      _showMessage('$_selectedRoomTypeは$minimum名から利用できます。');
+      return false;
+    }
+    if (maximum > 0 && guests > maximum) {
+      _showMessage('$_selectedRoomTypeの最大定員は$maximum名です。');
+      return false;
+    }
+    return true;
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -263,35 +365,19 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
                   validator: _required,
                 ),
                 const SizedBox(height: 12),
-                Container(
-                  decoration: BoxDecoration(
-                    border: Border.all(
-                      color: Theme.of(context).colorScheme.outlineVariant,
-                    ),
-                    borderRadius: BorderRadius.circular(8),
+                DropdownButtonFormField<StayPlan>(
+                  initialValue: _stayPlan,
+                  decoration: const InputDecoration(
+                    labelText: '宿泊プラン',
+                    border: OutlineInputBorder(),
                   ),
-                  child: Column(
-                    children: [
-                      CheckboxListTile(
-                        value: _hasBreakfast,
-                        onChanged: (value) {
-                          setState(() => _hasBreakfast = value ?? false);
-                        },
-                        secondary: const Icon(Icons.free_breakfast_outlined),
-                        title: const Text('朝食あり'),
-                        controlAffinity: ListTileControlAffinity.leading,
-                      ),
-                      CheckboxListTile(
-                        value: _hasDinner,
-                        onChanged: (value) {
-                          setState(() => _hasDinner = value ?? false);
-                        },
-                        secondary: const Icon(Icons.dinner_dining_outlined),
-                        title: const Text('夕食あり'),
-                        controlAffinity: ListTileControlAffinity.leading,
-                      ),
-                    ],
-                  ),
+                  items: [
+                    for (final plan in StayPlan.values)
+                      DropdownMenuItem(value: plan, child: Text(plan.label)),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) setState(() => _stayPlan = value);
+                  },
                 ),
                 const SizedBox(height: 12),
                 Row(
@@ -314,18 +400,45 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                TextFormField(
-                  controller: _roomController,
-                  decoration: const InputDecoration(labelText: '部屋名 *'),
-                  validator: _required,
+                DropdownButtonFormField<String>(
+                  initialValue: _selectedRoomType,
+                  decoration: const InputDecoration(
+                    labelText: '部屋タイプ *',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: [
+                    for (final roomType in _roomTypeChoices())
+                      DropdownMenuItem(value: roomType, child: Text(roomType)),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() => _selectedRoomType = value);
+                    }
+                  },
                 ),
                 const SizedBox(height: 12),
                 Row(
                   children: [
                     Expanded(child: _numberField(_adultsController, '大人 *')),
                     const SizedBox(width: 10),
-                    Expanded(child: _numberField(_childrenController, '子供 *')),
+                    Expanded(
+                      child: _numberField(
+                        _childrenWithBedController,
+                        '子ども・ベッドあり',
+                      ),
+                    ),
                     const SizedBox(width: 10),
+                    Expanded(
+                      child: _numberField(
+                        _childrenWithoutBedController,
+                        '子ども・ベッドなし',
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
                     Expanded(
                       child: TextFormField(
                         controller: _priceController,
@@ -333,6 +446,12 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
                         decoration: const InputDecoration(labelText: '金額（円）'),
                         validator: _optionalNumber,
                       ),
+                    ),
+                    const SizedBox(width: 10),
+                    OutlinedButton.icon(
+                      onPressed: _calculatePrice,
+                      icon: const Icon(Icons.calculate_outlined),
+                      label: const Text('設定料金から自動計算'),
                     ),
                   ],
                 ),
@@ -398,6 +517,14 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
         return number == null || number < 0 ? '0以上を入力' : null;
       },
     );
+  }
+
+  List<String> _roomTypeChoices() {
+    final result = widget.settings.availableRoomTypeNames.toList();
+    if (!result.contains(_selectedRoomType)) {
+      result.add(_selectedRoomType);
+    }
+    return result;
   }
 
   static String? _required(String? value) {

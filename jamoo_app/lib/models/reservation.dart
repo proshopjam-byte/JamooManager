@@ -10,6 +10,8 @@ class Reservation {
     required this.nights,
     required this.adults,
     required this.children,
+    this.childrenWithBed,
+    this.childrenWithoutBed,
     required this.totalGuests,
     required this.priceYen,
     required this.arrivalTime,
@@ -36,6 +38,8 @@ class Reservation {
   final int? nights;
   final int? adults;
   final int children;
+  final int? childrenWithBed;
+  final int? childrenWithoutBed;
   final int? totalGuests;
   final int? priceYen;
   final String? arrivalTime;
@@ -63,6 +67,8 @@ class Reservation {
       nights: _readNullableInt(json['nights']),
       adults: _readNullableInt(json['adults']),
       children: _readNullableInt(json['children']) ?? 0,
+      childrenWithBed: _readNullableInt(json['childrenWithBed']),
+      childrenWithoutBed: _readNullableInt(json['childrenWithoutBed']),
       totalGuests: _readNullableInt(json['totalGuests']),
       priceYen: _readNullableInt(json['priceYen']),
       arrivalTime: _readNullableString(json['arrivalTime']),
@@ -92,6 +98,8 @@ class Reservation {
       'nights': nights,
       'adults': adults,
       'children': children,
+      'childrenWithBed': childrenWithBed,
+      'childrenWithoutBed': childrenWithoutBed,
       'totalGuests': totalGuests,
       'priceYen': priceYen,
       'arrivalTime': arrivalTime,
@@ -213,6 +221,8 @@ class Reservation {
     int? nights,
     int? adults,
     int? children,
+    int? childrenWithBed,
+    int? childrenWithoutBed,
     int? totalGuests,
     int? priceYen,
     String? arrivalTime,
@@ -239,6 +249,8 @@ class Reservation {
       nights: nights ?? this.nights,
       adults: adults ?? this.adults,
       children: children ?? this.children,
+      childrenWithBed: childrenWithBed ?? this.childrenWithBed,
+      childrenWithoutBed: childrenWithoutBed ?? this.childrenWithoutBed,
       totalGuests: totalGuests ?? this.totalGuests,
       priceYen: priceYen ?? this.priceYen,
       arrivalTime: arrivalTime ?? this.arrivalTime,

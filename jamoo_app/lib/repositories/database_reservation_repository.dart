@@ -49,7 +49,8 @@ class DatabaseReservationRepository {
     required DateTime checkOut,
     required String roomName,
     required int adults,
-    required int children,
+    required int childrenWithBed,
+    required int childrenWithoutBed,
     required int? priceYen,
     required String? phone,
     required String? address,
@@ -70,10 +71,15 @@ class DatabaseReservationRepository {
       'check_in': _formatDate(checkIn),
       'check_out': _formatDate(checkOut),
       'adults': adults,
-      'children': children,
-      'total_guests': adults + children,
+      'children': childrenWithBed + childrenWithoutBed,
+      'total_guests': adults + childrenWithBed + childrenWithoutBed,
       'room_name': roomName.trim(),
       'price_yen': priceYen,
+      'plan_name': hasDinner
+          ? '2食付き'
+          : hasBreakfast
+          ? '朝食付き'
+          : '素泊まり',
       'status': 'confirmed',
       'special_requests': _emptyToNull(notes),
       'raw_payload': jsonEncode({
@@ -82,6 +88,8 @@ class DatabaseReservationRepository {
         'postalCode': _emptyToNull(postalCode),
         'hasBreakfast': hasBreakfast,
         'hasDinner': hasDinner,
+        'childrenWithBed': childrenWithBed,
+        'childrenWithoutBed': childrenWithoutBed,
       }),
       'created_at': now,
       'updated_at': now,
@@ -228,6 +236,8 @@ class DatabaseReservationRepository {
       nights: nights,
       adults: _readInt(row['adults']),
       children: _readInt(row['children']) ?? 0,
+      childrenWithBed: _readInt(manualData?['childrenWithBed']),
+      childrenWithoutBed: _readInt(manualData?['childrenWithoutBed']),
       totalGuests: _readInt(row['total_guests']),
       priceYen: _readInt(row['price_yen']),
       arrivalTime: _readText(row['arrival_time']),
