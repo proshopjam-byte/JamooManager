@@ -45,9 +45,9 @@ class CheckinCardPrintService {
       name: 'checkin_card_${reservation.displayGuestName}.pdf',
       format: PdfPageFormat.a5.landscape,
       dynamicLayout: false,
-      usePrinterSettings: true,
-      forceCustomPrintPaper: false,
-      windowsModernDialog: true,
+      usePrinterSettings: false,
+      forceCustomPrintPaper: true,
+      windowsModernDialog: false,
       onLayout: (_) => _buildPdf(reservation),
     );
   }
