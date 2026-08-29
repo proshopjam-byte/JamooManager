@@ -202,6 +202,16 @@ class Reservation {
     return '大人$adults名';
   }
 
+  /// True while this reservation occupies a room on [date].
+  /// The check-in date is included and the checkout date is excluded.
+  bool staysOn(DateTime date) {
+    if (checkIn == null || checkOut == null) return false;
+    final target = DateTime(date.year, date.month, date.day);
+    final arrival = DateTime(checkIn!.year, checkIn!.month, checkIn!.day);
+    final departure = DateTime(checkOut!.year, checkOut!.month, checkOut!.day);
+    return !target.isBefore(arrival) && target.isBefore(departure);
+  }
+
   String get displayPrice {
     if (priceYen == null) {
       return '料金未設定';

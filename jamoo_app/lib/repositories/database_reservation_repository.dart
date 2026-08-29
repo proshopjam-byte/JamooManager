@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:sqflite_common_ffi/sqflite_ffi.dart' show Database;
+
 import '../models/reservation.dart';
 import '../models/reservation_data.dart';
 import '../services/database_service.dart';
@@ -149,6 +151,43 @@ class DatabaseReservationRepository {
     return loadCheckInsForDate(DateTime.now());
   }
 
+  /// Loads every active reservation that occupies a room on [date].
+  ///
+  /// Unlike [loadCheckInsForDate], this includes guests who checked in on an
+  /// earlier day and are still staying. The checkout date is deliberately
+  /// excluded because the room is no longer occupied for that night's sheet.
+  Future<ReservationData> loadStaysForDate(DateTime date) async {
+    final targetDate = DateTime(date.year, date.month, date.day);
+    final targetText = _formatDate(targetDate);
+    final db = await DatabaseService.instance.database;
+
+    final rows = await db.rawQuery(
+      'SELECT r.*, '
+      'm.has_breakfast AS override_has_breakfast, '
+      'm.has_dinner AS override_has_dinner '
+      'FROM reservations r '
+      'LEFT JOIN reservation_meal_overrides m ON m.reservation_id = r.id '
+      'WHERE r.check_in IS NOT NULL AND r.check_out IS NOT NULL AND '
+      'r.check_in <= ? AND r.check_out > ? AND '
+      "LOWER(r.status) NOT IN ('cancelled', 'canceled') "
+      'ORDER BY r.check_in ASC, r.guest_name COLLATE NOCASE ASC',
+      [targetText, targetText],
+    );
+
+    final reservations = rows.map(_reservationFromRow).toList(growable: false);
+    final generatedAt = await _lastImportAt(db);
+
+    return ReservationData(
+      schemaVersion: 1,
+      generatedAt: generatedAt,
+      source: 'All',
+      scope: 'staying_guests',
+      targetDate: targetDate,
+      count: reservations.length,
+      reservations: reservations,
+    );
+  }
+
   Future<ReservationData> loadCheckInsForDate(DateTime date) async {
     final targetDate = DateTime(date.year, date.month, date.day);
     final targetText = _formatDate(targetDate);
@@ -165,6 +204,20 @@ class DatabaseReservationRepository {
 
     final reservations = rows.map(_reservationFromRow).toList(growable: false);
 
+    final generatedAt = await _lastImportAt(db);
+
+    return ReservationData(
+      schemaVersion: 1,
+      generatedAt: generatedAt,
+      source: 'Booking.com',
+      scope: 'today_checkins',
+      targetDate: targetDate,
+      count: reservations.length,
+      reservations: reservations,
+    );
+  }
+
+  Future<DateTime?> _lastImportAt(Database db) async {
     final metadata = await db.query(
       'app_metadata',
       columns: const ['value'],
@@ -177,22 +230,10 @@ class DatabaseReservationRepository {
       limit: 1,
     );
 
-    DateTime? generatedAt;
     if (metadata.isNotEmpty) {
-      generatedAt = DateTime.tryParse(
-        metadata.first['value']?.toString() ?? '',
-      );
+      return DateTime.tryParse(metadata.first['value']?.toString() ?? '');
     }
-
-    return ReservationData(
-      schemaVersion: 1,
-      generatedAt: generatedAt,
-      source: 'Booking.com',
-      scope: 'today_checkins',
-      targetDate: targetDate,
-      count: reservations.length,
-      reservations: reservations,
-    );
+    return null;
   }
 
   Reservation _reservationFromRow(Map<String, Object?> row) {

@@ -15,6 +15,7 @@ class FacilitySettingsPage extends StatefulWidget {
 
 class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
   static const _repository = FacilitySettingsRepository();
+  static const _maximumRooms = 15;
 
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _facilityNameController;
@@ -82,8 +83,8 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
       _showMessage('客室を1室以上登録してください。');
       return;
     }
-    if (_rooms.length > 10) {
-      _showMessage('客室は10室まで登録できます。');
+    if (_rooms.length > _maximumRooms) {
+      _showMessage('客室は$_maximumRooms室まで登録できます。');
       return;
     }
 
@@ -125,8 +126,8 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
   }
 
   void _addRoom() {
-    if (_rooms.length >= 10) {
-      _showMessage('客室は10室まで追加できます。');
+    if (_rooms.length >= _maximumRooms) {
+      _showMessage('客室は$_maximumRooms室まで追加できます。');
       return;
     }
     final used = _rooms
@@ -301,16 +302,21 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
                   ),
                 ),
                 OutlinedButton.icon(
-                  onPressed: _saving || _rooms.length >= 10 ? null : _addRoom,
+                  onPressed: _saving || _rooms.length >= _maximumRooms
+                      ? null
+                      : _addRoom,
                   icon: const Icon(Icons.add),
-                  label: Text('客室を追加（${_rooms.length}/10）'),
+                  label: Text('客室を追加（${_rooms.length}/$_maximumRooms）'),
                 ),
               ],
             ),
             const SizedBox(height: 4),
             const Text(
+              '小規模施設向けに最大15室まで登録できます。'
+              '部屋タイプ名は自由入力でき、客室ごとに人数を設定できます。'
               '通常人数は自動部屋割りで使う人数、'
-              '最大定員はお子様を含め手動で選択できる上限です。',
+              '最大定員はお子様を含め手動で選択できる上限です。'
+              '独自の部屋タイプは自動部屋割り分類で「その他」を選択してください。',
             ),
             const SizedBox(height: 12),
             for (var index = 0; index < _rooms.length; index++)

@@ -9,13 +9,17 @@ class RoomAssignmentResult {
 }
 
 class RoomAssignmentService {
-  RoomAssignmentService({required List<GuestRoomSpec> rooms})
-    : rooms = List.unmodifiable(
-        List<GuestRoomSpec>.from(rooms)
-          ..sort((first, second) => first.number.compareTo(second.number)),
-      );
+  RoomAssignmentService({
+    required List<GuestRoomSpec> rooms,
+    required DateTime stayDate,
+  }) : stayDate = DateTime(stayDate.year, stayDate.month, stayDate.day),
+       rooms = List.unmodifiable(
+         List<GuestRoomSpec>.from(rooms)
+           ..sort((first, second) => first.number.compareTo(second.number)),
+       );
 
   final List<GuestRoomSpec> rooms;
+  final DateTime stayDate;
 
   CheckinSheetRow assignReservation({
     required int roomNumber,
@@ -55,6 +59,88 @@ class RoomAssignmentService {
           (room) => byRoom[room.number] ?? CheckinSheetRow.empty(room.number),
         )
         .toList(growable: false);
+    return _assignMissing(rows, reservations);
+  }
+
+  /// Carries continuing guests into a new day's sheet while keeping their
+  /// previous room numbers. Daily fields are rebuilt so yesterday's payment,
+  /// check-in state, and service times are not copied accidentally.
+  RoomAssignmentResult carryForward(
+    List<CheckinSheetRow> previousRows,
+    List<Reservation> reservations,
+  ) {
+    final emptyRows = rooms
+        .map((room) => CheckinSheetRow.empty(room.number))
+        .toList(growable: false);
+    return reconcileWithCarryForward(emptyRows, previousRows, reservations);
+  }
+
+  /// Preserves edits already saved for [stayDate], then fills empty rooms from
+  /// the previous day's assignment before assigning newly arriving guests.
+  RoomAssignmentResult reconcileWithCarryForward(
+    List<CheckinSheetRow> currentRows,
+    List<CheckinSheetRow> previousRows,
+    List<Reservation> reservations,
+  ) {
+    final reservationByKey = {
+      for (final reservation in reservations)
+        reservationKey(reservation): reservation,
+    };
+    final activeKeys = reservationByKey.keys.toSet();
+    final currentByRoom = <int, CheckinSheetRow>{
+      for (final row in currentRows)
+        row.roomNumber:
+            row.hasReservation && activeKeys.contains(row.reservationKey)
+            ? _refreshSavedRow(row, reservationByKey[row.reservationKey]!)
+            : CheckinSheetRow.empty(row.roomNumber),
+    };
+    final rows = rooms
+        .map(
+          (room) =>
+              currentByRoom[room.number] ?? CheckinSheetRow.empty(room.number),
+        )
+        .toList(growable: false);
+    final assignedCounts = <String, int>{};
+    final detailsAdded = <String>{};
+    for (final row in rows.where((row) => row.hasReservation)) {
+      final key = row.reservationKey!;
+      assignedCounts[key] = (assignedCounts[key] ?? 0) + row.guestCount;
+      detailsAdded.add(key);
+    }
+
+    for (final previousRow in previousRows) {
+      final key = previousRow.reservationKey;
+      if (key == null) continue;
+      final reservation = reservationByKey[key];
+      if (reservation == null || !_isStayover(reservation)) continue;
+
+      final room = _roomByNumber(previousRow.roomNumber);
+      if (room == null || !room.isAvailable) continue;
+      final rowIndex = rows.indexWhere(
+        (row) => row.roomNumber == previousRow.roomNumber,
+      );
+      if (rowIndex < 0 || rows[rowIndex].hasReservation) continue;
+
+      final expected = guestCount(reservation);
+      final alreadyAssigned = assignedCounts[key] ?? 0;
+      final remaining = expected - alreadyAssigned;
+      if (remaining <= 0) continue;
+
+      final maximumForRoom = remaining < room.capacity
+          ? remaining
+          : room.capacity;
+      final count = previousRow.guestCount <= 0
+          ? maximumForRoom
+          : previousRow.guestCount.clamp(1, maximumForRoom).toInt();
+      rows[rowIndex] = _rowForReservation(
+        roomNumber: room.number,
+        reservation: reservation,
+        guestCount: count,
+        includeBookingDetails: detailsAdded.add(key),
+      );
+      assignedCounts[key] = alreadyAssigned + count;
+    }
+
     return _assignMissing(rows, reservations);
   }
 
@@ -440,12 +526,22 @@ class RoomAssignmentService {
     return second.number.compareTo(first.number);
   }
 
-  static CheckinSheetRow _rowForReservation({
+  CheckinSheetRow _rowForReservation({
     required int roomNumber,
     required Reservation reservation,
     required int guestCount,
     required bool includeBookingDetails,
   }) {
+    final stayProgressLabel = _stayProgressLabel(reservation);
+    final isStayover = _isStayover(reservation);
+    final reservationNotes = includeBookingDetails
+        ? reservation.specialRequests?.trim() ?? ''
+        : '';
+    final notes = [
+      stayProgressLabel ?? '',
+      reservationNotes,
+    ].where((value) => value.isNotEmpty).join('・');
+
     return CheckinSheetRow(
       roomNumber: roomNumber,
       reservationKey: reservationKey(reservation),
@@ -453,15 +549,68 @@ class RoomAssignmentService {
       reservationNumber: reservation.reservationNumber ?? reservation.id,
       guestName: reservation.displayGuestName,
       guestCount: guestCount,
-      checkedIn: false,
-      amountYen: includeBookingDetails ? reservation.priceYen : null,
-      payment: includeBookingDetails ? _defaultPayment(reservation) : '',
+      checkedIn: isStayover,
+      amountYen: includeBookingDetails && !isStayover
+          ? reservation.priceYen
+          : null,
+      payment: includeBookingDetails && !isStayover
+          ? _defaultPayment(reservation)
+          : '',
       dinnerAndTable: reservation.hasDinner == true ? 'あり' : '',
       bathTime: '',
       breakfastTime: '',
       checkedOut: false,
-      notes: includeBookingDetails ? reservation.specialRequests ?? '' : '',
+      notes: notes,
     );
+  }
+
+  CheckinSheetRow _refreshSavedRow(
+    CheckinSheetRow row,
+    Reservation reservation,
+  ) {
+    final progressLabel = _stayProgressLabel(reservation);
+    if (progressLabel == null) return row;
+
+    final savedNotes = row.notes
+        .replaceAll(RegExp(r'連泊(?:開始|中)（\d+泊目／全\d+泊）'), '')
+        .split('・')
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .join('・');
+    final notes = [
+      progressLabel,
+      savedNotes,
+    ].where((value) => value.isNotEmpty).join('・');
+    final isStayover = _isStayover(reservation);
+
+    return row.copyWith(
+      checkedIn: isStayover ? true : row.checkedIn,
+      clearAmount: isStayover,
+      payment: isStayover ? '' : row.payment,
+      notes: notes,
+    );
+  }
+
+  bool _isStayover(Reservation reservation) {
+    final checkIn = reservation.checkIn;
+    if (checkIn == null || !reservation.staysOn(stayDate)) return false;
+    final arrival = DateTime(checkIn.year, checkIn.month, checkIn.day);
+    return stayDate.isAfter(arrival);
+  }
+
+  String? _stayProgressLabel(Reservation reservation) {
+    if (!reservation.staysOn(stayDate)) return null;
+    final checkIn = reservation.checkIn!;
+    final checkOut = reservation.checkOut!;
+    final arrival = DateTime(checkIn.year, checkIn.month, checkIn.day);
+    final departure = DateTime(checkOut.year, checkOut.month, checkOut.day);
+    final currentNight = stayDate.difference(arrival).inDays + 1;
+    final totalNights = departure.difference(arrival).inDays;
+    if (totalNights <= 1) return null;
+    if (currentNight == 1) {
+      return '連泊開始（1泊目／全$totalNights泊）';
+    }
+    return '連泊中（$currentNight泊目／全$totalNights泊）';
   }
 
   static String _defaultPayment(Reservation reservation) {

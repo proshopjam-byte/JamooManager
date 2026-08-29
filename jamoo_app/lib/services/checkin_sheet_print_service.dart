@@ -67,29 +67,30 @@ class CheckinSheetPrintService {
     final bold = await PdfGoogleFonts.notoSansJPBold();
     final sortedRows = List<CheckinSheetRow>.from(rows)
       ..sort((first, second) => first.roomNumber.compareTo(second.roomNumber));
-    final displayedKeys = <String>{};
-    final rowHeight = sortedRows.isEmpty
-        ? 45.0
-        : (360 / sortedRows.length).clamp(25, 45).toDouble();
+    final totalGuests = sortedRows
+        .where(
+          (row) => facilitySettings.roomByNumber(row.roomNumber).isAvailable,
+        )
+        .fold<int>(0, (sum, row) => sum + row.guestCount);
+    final totalAmount = sortedRows.fold<int>(
+      0,
+      (sum, row) => sum + (row.amountYen ?? 0),
+    );
+    final pages = _splitRows(sortedRows);
 
-    document.addPage(
-      pw.Page(
-        pageFormat: PdfPageFormat.a4.landscape,
-        margin: const pw.EdgeInsets.fromLTRB(18, 16, 18, 14),
-        theme: pw.ThemeData.withFont(base: regular, bold: bold),
-        build: (_) {
-          final totalGuests = sortedRows
-              .where(
-                (row) =>
-                    facilitySettings.roomByNumber(row.roomNumber).isAvailable,
-              )
-              .fold<int>(0, (sum, row) => sum + row.guestCount);
-          final totalAmount = sortedRows.fold<int>(
-            0,
-            (sum, row) => sum + (row.amountYen ?? 0),
-          );
+    for (var pageIndex = 0; pageIndex < pages.length; pageIndex++) {
+      final pageRows = pages[pageIndex];
+      final displayedKeys = <String>{};
+      final rowHeight = pageRows.isEmpty
+          ? 45.0
+          : (360 / pageRows.length).clamp(25, 45).toDouble();
 
-          return pw.Column(
+      document.addPage(
+        pw.Page(
+          pageFormat: PdfPageFormat.a4.landscape,
+          margin: const pw.EdgeInsets.fromLTRB(18, 16, 18, 14),
+          theme: pw.ThemeData.withFont(base: regular, bold: bold),
+          build: (_) => pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.stretch,
             children: [
               pw.Row(
@@ -112,7 +113,14 @@ class CheckinSheetPrintService {
                       ),
                     ),
                   ),
-                  pw.SizedBox(width: 90),
+                  pw.SizedBox(
+                    width: 90,
+                    child: pw.Text(
+                      '${pageIndex + 1} / ${pages.length}',
+                      textAlign: pw.TextAlign.right,
+                      style: const pw.TextStyle(fontSize: 8),
+                    ),
+                  ),
                 ],
               ),
               pw.SizedBox(height: 8),
@@ -133,7 +141,7 @@ class CheckinSheetPrintService {
                 },
                 children: [
                   _headerRow(),
-                  for (final row in sortedRows)
+                  for (final row in pageRows)
                     _dataRow(row, displayedKeys, facilitySettings, rowHeight),
                 ],
               ),
@@ -142,7 +150,7 @@ class CheckinSheetPrintService {
                 children: [
                   pw.SizedBox(width: 30),
                   pw.Text(
-                    '合計人数　$totalGuests名',
+                    '全ページ合計人数　$totalGuests名',
                     style: pw.TextStyle(
                       fontSize: 11,
                       fontWeight: pw.FontWeight.bold,
@@ -150,7 +158,7 @@ class CheckinSheetPrintService {
                   ),
                   pw.SizedBox(width: 35),
                   pw.Text(
-                    '合計金額　${_formatYen(totalAmount)}',
+                    '全ページ合計金額　${_formatYen(totalAmount)}',
                     style: pw.TextStyle(
                       fontSize: 11,
                       fontWeight: pw.FontWeight.bold,
@@ -164,12 +172,24 @@ class CheckinSheetPrintService {
                 ],
               ),
             ],
-          );
-        },
-      ),
-    );
+          ),
+        ),
+      );
+    }
 
     return document.save();
+  }
+
+  static List<List<CheckinSheetRow>> _splitRows(List<CheckinSheetRow> rows) {
+    const rowsPerPage = 12;
+    if (rows.isEmpty) return const [<CheckinSheetRow>[]];
+    return [
+      for (var start = 0; start < rows.length; start += rowsPerPage)
+        rows.sublist(
+          start,
+          start + rowsPerPage > rows.length ? rows.length : start + rowsPerPage,
+        ),
+    ];
   }
 
   static pw.TableRow _headerRow() {

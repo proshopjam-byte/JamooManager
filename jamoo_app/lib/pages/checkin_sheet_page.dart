@@ -32,9 +32,7 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
   List<CheckinSheetRow> _rows = const [];
   List<String> _warnings = const [];
   FacilitySettings _facilitySettings = FacilitySettings.defaults;
-  late RoomAssignmentService _assignmentService = RoomAssignmentService(
-    rooms: FacilitySettings.defaults.rooms,
-  );
+  late RoomAssignmentService _assignmentService;
   bool _loading = true;
   bool _saving = false;
   bool _dirty = false;
@@ -44,6 +42,10 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
   @override
   void initState() {
     super.initState();
+    _assignmentService = RoomAssignmentService(
+      rooms: FacilitySettings.defaults.rooms,
+      stayDate: widget.date,
+    );
     _load();
   }
 
@@ -63,17 +65,27 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
       final facilitySettings = await _facilitySettingsRepository.load();
       final assignmentService = RoomAssignmentService(
         rooms: facilitySettings.rooms,
+        stayDate: widget.date,
       );
-      final data = await _reservationRepository.loadCheckInsForDate(
-        widget.date,
-      );
+      final data = await _reservationRepository.loadStaysForDate(widget.date);
       final savedRows = await _sheetRepository.load(
         widget.date,
         rooms: facilitySettings.rooms,
       );
+      final previousRows = await _sheetRepository.load(
+        widget.date.subtract(const Duration(days: 1)),
+        rooms: facilitySettings.rooms,
+      );
       final hasSavedAssignment = savedRows.any((row) => row.hasReservation);
-      final result = hasSavedAssignment
-          ? assignmentService.reconcile(savedRows, data.reservations)
+      final hasPreviousAssignment = previousRows.any(
+        (row) => row.hasReservation,
+      );
+      final result = hasSavedAssignment || hasPreviousAssignment
+          ? assignmentService.reconcileWithCarryForward(
+              savedRows,
+              previousRows,
+              data.reservations,
+            )
           : assignmentService.create(data.reservations);
 
       if (!mounted) {
