@@ -6,11 +6,11 @@ enum GuestRoomType {
   String get label {
     switch (this) {
       case GuestRoomType.standardTwin:
-        return 'スタンダードツイン';
+        return '少人数向け';
       case GuestRoomType.loft:
-        return 'ロフト付き';
+        return '大人数向け';
       case GuestRoomType.other:
-        return 'その他';
+        return '標準・その他';
     }
   }
 
@@ -29,7 +29,9 @@ class GuestRoomSpec {
     required this.normalCapacity,
     required this.capacity,
     required this.type,
+    this.roomName = '',
     this.isAvailable = true,
+    this.adjacentRoomNumbers = const [],
   });
 
   factory GuestRoomSpec.fromJson(Map<String, Object?> json) {
@@ -37,6 +39,7 @@ class GuestRoomSpec {
     final normalCapacity = _readInt(json['normalCapacity'], fallback: capacity);
     return GuestRoomSpec(
       number: _readInt(json['number'], fallback: 1),
+      roomName: json['roomName']?.toString().trim() ?? '',
       label: json['label']?.toString().trim().isNotEmpty == true
           ? json['label'].toString().trim()
           : GuestRoomType.fromName(json['type']?.toString()).label,
@@ -44,19 +47,23 @@ class GuestRoomSpec {
       capacity: capacity,
       type: GuestRoomType.fromName(json['type']?.toString()),
       isAvailable: json['isAvailable'] != false,
+      adjacentRoomNumbers: _readIntList(json['adjacentRoomNumbers']),
     );
   }
 
   final int number;
+  final String roomName;
   final String label;
   final int normalCapacity;
   final int capacity;
   final GuestRoomType type;
   final bool isAvailable;
+  final List<int> adjacentRoomNumbers;
 
   bool get isLoft => type == GuestRoomType.loft;
 
-  String get displayName => '$number号室';
+  String get displayName =>
+      roomName.trim().isEmpty ? '$number号室' : roomName.trim();
 
   String get typeLabel {
     if (!isAvailable) {
@@ -67,30 +74,36 @@ class GuestRoomSpec {
 
   GuestRoomSpec copyWith({
     int? number,
+    String? roomName,
     String? label,
     int? normalCapacity,
     int? capacity,
     GuestRoomType? type,
     bool? isAvailable,
+    List<int>? adjacentRoomNumbers,
   }) {
     return GuestRoomSpec(
       number: number ?? this.number,
+      roomName: roomName ?? this.roomName,
       label: label ?? this.label,
       normalCapacity: normalCapacity ?? this.normalCapacity,
       capacity: capacity ?? this.capacity,
       type: type ?? this.type,
       isAvailable: isAvailable ?? this.isAvailable,
+      adjacentRoomNumbers: adjacentRoomNumbers ?? this.adjacentRoomNumbers,
     );
   }
 
   Map<String, Object?> toJson() {
     return {
       'number': number,
+      'roomName': roomName,
       'label': label,
       'normalCapacity': normalCapacity,
       'capacity': capacity,
       'type': type.name,
       'isAvailable': isAvailable,
+      'adjacentRoomNumbers': adjacentRoomNumbers,
     };
   }
 
@@ -102,6 +115,16 @@ class GuestRoomSpec {
       return value.toInt();
     }
     return int.tryParse(value?.toString() ?? '') ?? fallback;
+  }
+
+  static List<int> _readIntList(Object? value) {
+    if (value is! List) return const [];
+    final result = <int>{};
+    for (final item in value) {
+      final parsed = _readInt(item, fallback: 0);
+      if (parsed > 0) result.add(parsed);
+    }
+    return List.unmodifiable(result);
   }
 }
 

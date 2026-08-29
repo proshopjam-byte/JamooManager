@@ -80,6 +80,7 @@ class FacilitySettings {
         normalCapacity: 4,
         capacity: 5,
         type: GuestRoomType.loft,
+        adjacentRoomNumbers: [3],
       ),
       GuestRoomSpec(
         number: 3,
@@ -87,6 +88,7 @@ class FacilitySettings {
         normalCapacity: 2,
         capacity: 3,
         type: GuestRoomType.standardTwin,
+        adjacentRoomNumbers: [2],
       ),
       GuestRoomSpec(
         number: 4,
@@ -116,6 +118,7 @@ class FacilitySettings {
         normalCapacity: 2,
         capacity: 3,
         type: GuestRoomType.standardTwin,
+        adjacentRoomNumbers: [8],
       ),
       GuestRoomSpec(
         number: 8,
@@ -123,6 +126,7 @@ class FacilitySettings {
         normalCapacity: 4,
         capacity: 5,
         type: GuestRoomType.loft,
+        adjacentRoomNumbers: [7],
       ),
     ],
   );

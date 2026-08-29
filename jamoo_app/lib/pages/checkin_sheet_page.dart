@@ -470,7 +470,7 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${row.roomNumber}号室',
+                  room.displayName,
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 Text(room.typeLabel, style: const TextStyle(fontSize: 11)),

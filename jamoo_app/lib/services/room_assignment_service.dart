@@ -161,10 +161,10 @@ class RoomAssignmentService {
         continue;
       }
       if (!room.isAvailable && row.hasReservation) {
-        warnings.add('${row.roomNumber}号室は使用不可です。');
+        warnings.add('${room.displayName}は使用不可です。');
       }
       if (row.guestCount > room.capacity && room.isAvailable) {
-        warnings.add('${row.roomNumber}号室は定員${room.capacity}名を超えています。');
+        warnings.add('${room.displayName}は定員${room.capacity}名を超えています。');
       }
     }
 
@@ -195,13 +195,9 @@ class RoomAssignmentService {
     final warnings = <String>[];
     final sortedReservations = List<Reservation>.from(reservations)
       ..sort((first, second) {
-        final firstLarge = _prefersLoft(first) ? 0 : 1;
-        final secondLarge = _prefersLoft(second) ? 0 : 1;
-        final typeOrder = firstLarge.compareTo(secondLarge);
-        if (typeOrder != 0) {
-          return typeOrder;
-        }
-        return guestCount(second).compareTo(guestCount(first));
+        final guestOrder = guestCount(second).compareTo(guestCount(first));
+        if (guestOrder != 0) return guestOrder;
+        return second.roomCount.compareTo(first.roomCount);
       });
 
     for (final reservation in sortedReservations) {
@@ -244,7 +240,20 @@ class RoomAssignmentService {
         }
       }
 
-      for (final roomNumber in _candidateRoomNumbers(reservation)) {
+      final occupiedRoomNumbers = rows
+          .where((row) => row.hasReservation)
+          .map((row) => row.roomNumber)
+          .toSet();
+      final assignedRoomNumbers = rows
+          .where((row) => row.reservationKey == key)
+          .map((row) => row.roomNumber)
+          .toSet();
+      for (final roomNumber in _candidateRoomNumbers(
+        reservation,
+        excludedRoomNumbers: occupiedRoomNumbers,
+        preferredAdjacentTo: assignedRoomNumbers,
+        guestsToAssign: remainingGuests,
+      )) {
         if (remainingGuests <= 0) {
           break;
         }
@@ -280,40 +289,70 @@ class RoomAssignmentService {
     return RoomAssignmentResult(rows: rows, warnings: _unique(warnings));
   }
 
-  List<int> _candidateRoomNumbers(Reservation reservation) {
-    final available = rooms.where((room) => room.isAvailable).toList();
-    final lofts = available.where((room) => room.isLoft).toList();
-    final standard = available
-        .where((room) => room.type == GuestRoomType.standardTwin)
-        .toList();
-    final other = available
+  List<int> _candidateRoomNumbers(
+    Reservation reservation, {
+    Set<int> excludedRoomNumbers = const {},
+    Set<int> preferredAdjacentTo = const {},
+    int? guestsToAssign,
+  }) {
+    final requestedGuests = guestsToAssign ?? guestCount(reservation);
+    if (requestedGuests <= 0) return const [];
+    final available = rooms
         .where(
-          (room) => !room.isLoft && room.type != GuestRoomType.standardTwin,
+          (room) =>
+              room.isAvailable && !excludedRoomNumbers.contains(room.number),
         )
         .toList();
+    if (available.isEmpty) return const [];
 
-    if (!_prefersLoft(reservation) || lofts.isEmpty) {
-      return [
-        ...standard,
-        ...other,
-        ...lofts,
-      ].map((room) => room.number).toList(growable: false);
-    }
+    available.sort((first, second) {
+      final firstAdjacent = _isAdjacentToAny(first, preferredAdjacentTo);
+      final secondAdjacent = _isAdjacentToAny(second, preferredAdjacentTo);
+      if (firstAdjacent != secondAdjacent) return firstAdjacent ? -1 : 1;
 
-    final result = <int>[];
-    final remainingStandard = List<GuestRoomSpec>.from(standard);
-    for (final loft in lofts) {
-      result.add(loft.number);
-      if (remainingStandard.isNotEmpty) {
-        remainingStandard.sort(
-          (first, second) => _compareDistance(first, second, loft.number),
-        );
-        result.add(remainingStandard.removeAt(0).number);
+      if (preferredAdjacentTo.isEmpty) {
+        final firstNamed = _roomMatchesReservationName(first, reservation);
+        final secondNamed = _roomMatchesReservationName(second, reservation);
+        if (firstNamed != secondNamed) return firstNamed ? -1 : 1;
       }
-    }
-    result.addAll(remainingStandard.map((room) => room.number));
-    result.addAll(other.map((room) => room.number));
-    return result;
+
+      final firstDifference = (first.normalCapacity - requestedGuests).abs();
+      final secondDifference = (second.normalCapacity - requestedGuests).abs();
+      final differenceOrder = firstDifference.compareTo(secondDifference);
+      if (differenceOrder != 0) return differenceOrder;
+
+      final capacityOrder = first.normalCapacity.compareTo(
+        second.normalCapacity,
+      );
+      if (capacityOrder != 0) return capacityOrder;
+      if (preferredAdjacentTo.isNotEmpty) {
+        final firstDistance = _distanceToAny(first, preferredAdjacentTo);
+        final secondDistance = _distanceToAny(second, preferredAdjacentTo);
+        final distanceOrder = firstDistance.compareTo(secondDistance);
+        if (distanceOrder != 0) return distanceOrder;
+        return second.number.compareTo(first.number);
+      }
+      return first.number.compareTo(second.number);
+    });
+
+    final primary = available.first;
+    final remainingGuests = (requestedGuests - primary.normalCapacity)
+        .clamp(1, requestedGuests)
+        .toInt();
+    final remainingRooms = available.skip(1).toList()
+      ..sort((first, second) {
+        final firstAdjacent = _areAdjacent(primary, first);
+        final secondAdjacent = _areAdjacent(primary, second);
+        if (firstAdjacent != secondAdjacent) return firstAdjacent ? -1 : 1;
+
+        final firstDifference = (first.normalCapacity - remainingGuests).abs();
+        final secondDifference = (second.normalCapacity - remainingGuests)
+            .abs();
+        final differenceOrder = firstDifference.compareTo(secondDifference);
+        if (differenceOrder != 0) return differenceOrder;
+        return _compareDistance(first, second, primary.number);
+      });
+    return [primary.number, ...remainingRooms.map((room) => room.number)];
   }
 
   List<_PlannedRoom> _specifiedRoomPlan(Reservation reservation) {
@@ -328,14 +367,9 @@ class RoomAssignmentService {
       if (segment.isEmpty) {
         continue;
       }
-      final lower = segment.toLowerCase();
-      final isLoft = lower.contains('ロフト') || lower.contains('loft');
-      final isTwin =
-          lower.contains('スタンダード') ||
-          lower.contains('ツイン') ||
-          lower.contains('standard twin') ||
-          lower.contains('twin room');
-      if (!isLoft && !isTwin) {
+      final configuredRoom = _configuredRoomForSegment(segment);
+      final legacyType = _legacyRoomTypeForSegment(segment);
+      if (configuredRoom == null && legacyType == null) {
         continue;
       }
 
@@ -343,7 +377,15 @@ class RoomAssignmentService {
         r'(\d+)\s*[x×]',
         caseSensitive: false,
       ).firstMatch(segment);
-      final roomCount = int.tryParse(countMatch?.group(1) ?? '') ?? 1;
+      final suffixCountMatch = RegExp(
+        r'[x×]\s*(\d+)',
+        caseSensitive: false,
+      ).firstMatch(segment);
+      final roomCount =
+          int.tryParse(
+            countMatch?.group(1) ?? suffixCountMatch?.group(1) ?? '',
+          ) ??
+          1;
       final japaneseGuests = RegExp(
         r'(\d+)\s*名(?!\s*(?:室|部屋))',
       ).firstMatch(segment);
@@ -358,7 +400,10 @@ class RoomAssignmentService {
       for (var index = 0; index < roomCount; index++) {
         requests.add(
           _RequestedRoom(
-            type: isLoft ? GuestRoomType.loft : GuestRoomType.standardTwin,
+            roomTypeKey: configuredRoom == null
+                ? null
+                : _roomTypeKey(configuredRoom.label),
+            fallbackType: configuredRoom?.type ?? legacyType!,
             specifiedGuests: roomCount == 1 ? specifiedGuests : null,
           ),
         );
@@ -371,8 +416,8 @@ class RoomAssignmentService {
     final counts = List<int>.filled(requests.length, 0);
     var remaining = guestCount(reservation);
     if (requests.length == 1 && requests.first.specifiedGuests == null) {
-      final maximum = _capacityFor(requests.first.type, maximum: true);
-      final count = remaining > maximum ? maximum : remaining;
+      final normalCapacity = _capacityForRequest(requests.first);
+      final count = remaining > normalCapacity ? normalCapacity : remaining;
       counts[0] = count;
       remaining -= count;
     }
@@ -381,32 +426,24 @@ class RoomAssignmentService {
       if (specified == null || remaining <= 0) {
         continue;
       }
-      final maximum = _capacityFor(requests[index].type, maximum: true);
+      final maximum = _capacityForRequest(requests[index], maximum: true);
       final limited = specified > maximum ? maximum : specified;
       final count = limited > remaining ? remaining : limited;
       counts[index] = count;
       remaining -= count;
     }
 
-    final unspecified =
-        <int>[
-          for (var index = 0; index < requests.length; index++)
-            if (requests[index].specifiedGuests == null && counts[index] == 0)
-              index,
-        ]..sort((first, second) {
-          final firstLoft = requests[first].type == GuestRoomType.loft;
-          final secondLoft = requests[second].type == GuestRoomType.loft;
-          if (firstLoft == secondLoft) {
-            return first.compareTo(second);
-          }
-          return firstLoft ? 1 : -1;
-        });
+    final unspecified = <int>[
+      for (var index = 0; index < requests.length; index++)
+        if (requests[index].specifiedGuests == null && counts[index] == 0)
+          index,
+    ];
 
     for (var position = 0; position < unspecified.length; position++) {
       final index = unspecified[position];
       final roomsAfter = unspecified.length - position - 1;
       final available = remaining - roomsAfter;
-      final capacity = _capacityFor(requests[index].type);
+      final capacity = _capacityForRequest(requests[index]);
       final count = available <= 0
           ? 0
           : available > capacity
@@ -417,42 +454,35 @@ class RoomAssignmentService {
     }
 
     final roomNumbers = List<int?>.filled(requests.length, null);
-    final unusedLofts = rooms
-        .where((room) => room.isAvailable && room.type == GuestRoomType.loft)
-        .toList();
-    final unusedStandard = rooms
-        .where(
-          (room) => room.isAvailable && room.type == GuestRoomType.standardTwin,
-        )
-        .toList();
-    final selectedLofts = <GuestRoomSpec>[];
-
+    final selectedRooms = <GuestRoomSpec>[];
+    final usedRoomNumbers = <int>{};
     for (var index = 0; index < requests.length; index++) {
-      if (requests[index].type != GuestRoomType.loft || unusedLofts.isEmpty) {
-        continue;
-      }
-      final room = unusedLofts.removeAt(0);
-      selectedLofts.add(room);
-      roomNumbers[index] = room.number;
-    }
-
-    var standardPosition = 0;
-    for (var index = 0; index < requests.length; index++) {
-      if (requests[index].type != GuestRoomType.standardTwin ||
-          unusedStandard.isEmpty) {
-        continue;
-      }
-      if (selectedLofts.isNotEmpty) {
-        final anchor =
-            selectedLofts[standardPosition
-                .clamp(0, selectedLofts.length - 1)
-                .toInt()];
-        unusedStandard.sort(
-          (first, second) => _compareDistance(first, second, anchor.number),
+      final candidates = _roomsForRequest(
+        requests[index],
+      ).where((room) => !usedRoomNumbers.contains(room.number)).toList();
+      if (candidates.isEmpty) continue;
+      candidates.sort((first, second) {
+        final firstAdjacent = selectedRooms.any(
+          (selected) => _areAdjacent(selected, first),
         );
-      }
-      roomNumbers[index] = unusedStandard.removeAt(0).number;
-      standardPosition++;
+        final secondAdjacent = selectedRooms.any(
+          (selected) => _areAdjacent(selected, second),
+        );
+        if (firstAdjacent != secondAdjacent) return firstAdjacent ? -1 : 1;
+        if (selectedRooms.isNotEmpty) {
+          final distanceOrder = _compareDistance(
+            first,
+            second,
+            selectedRooms.last.number,
+          );
+          if (distanceOrder != 0) return distanceOrder;
+        }
+        return first.number.compareTo(second.number);
+      });
+      final selected = candidates.first;
+      roomNumbers[index] = selected.number;
+      selectedRooms.add(selected);
+      usedRoomNumbers.add(selected.number);
     }
 
     final plan = <_PlannedRoom>[];
@@ -465,19 +495,11 @@ class RoomAssignmentService {
       }
     }
 
-    final roomOrder = _candidateRoomNumbers(reservation);
-    plan.sort((first, second) {
-      final firstIndex = roomOrder.indexOf(first.roomNumber);
-      final secondIndex = roomOrder.indexOf(second.roomNumber);
-      return firstIndex.compareTo(secondIndex);
-    });
     return plan;
   }
 
-  int _capacityFor(GuestRoomType type, {bool maximum = false}) {
-    final matching = rooms.where(
-      (room) => room.isAvailable && room.type == type,
-    );
+  int _capacityForRequest(_RequestedRoom request, {bool maximum = false}) {
+    final matching = _roomsForRequest(request);
     if (matching.isEmpty) {
       return 1;
     }
@@ -486,21 +508,87 @@ class RoomAssignmentService {
         .reduce((first, second) => first > second ? first : second);
   }
 
-  bool _prefersLoft(Reservation reservation) {
-    final roomName = reservation.roomName?.toLowerCase() ?? '';
-    final standardCapacities = rooms
+  List<GuestRoomSpec> _roomsForRequest(_RequestedRoom request) {
+    final matchingLabel = request.roomTypeKey;
+    return rooms
         .where(
-          (room) => room.isAvailable && room.type == GuestRoomType.standardTwin,
+          (room) =>
+              room.isAvailable &&
+              (matchingLabel != null
+                  ? _roomTypeKey(room.label) == matchingLabel
+                  : room.type == request.fallbackType),
         )
-        .map((room) => room.normalCapacity);
-    final standardCapacity = standardCapacities.isEmpty
-        ? 2
-        : standardCapacities.reduce(
-            (first, second) => first > second ? first : second,
+        .toList(growable: false);
+  }
+
+  GuestRoomSpec? _configuredRoomForSegment(String segment) {
+    final normalized = _roomTypeKey(segment);
+    final matching =
+        rooms
+            .where(
+              (room) =>
+                  room.isAvailable &&
+                  _roomTypeKey(room.label).length >= 2 &&
+                  normalized.contains(_roomTypeKey(room.label)),
+            )
+            .toList()
+          ..sort(
+            (first, second) =>
+                second.label.length.compareTo(first.label.length),
           );
-    return guestCount(reservation) > standardCapacity ||
-        roomName.contains('ロフト') ||
-        roomName.contains('loft');
+    return matching.isEmpty ? null : matching.first;
+  }
+
+  GuestRoomType? _legacyRoomTypeForSegment(String segment) {
+    final lower = segment.toLowerCase();
+    if (lower.contains('ロフト') || lower.contains('loft')) {
+      return GuestRoomType.loft;
+    }
+    if (lower.contains('スタンダード') ||
+        lower.contains('ツイン') ||
+        lower.contains('standard twin') ||
+        lower.contains('twin room')) {
+      return GuestRoomType.standardTwin;
+    }
+    return null;
+  }
+
+  bool _roomMatchesReservationName(
+    GuestRoomSpec room,
+    Reservation reservation,
+  ) {
+    final name = reservation.roomName?.trim() ?? '';
+    if (name.isEmpty) return false;
+    final normalizedName = _roomTypeKey(name);
+    final roomKey = _roomTypeKey(room.label);
+    if (roomKey.length >= 2 && normalizedName.contains(roomKey)) return true;
+    return _legacyRoomTypeForSegment(name) == room.type;
+  }
+
+  bool _areAdjacent(GuestRoomSpec first, GuestRoomSpec second) {
+    return first.adjacentRoomNumbers.contains(second.number) ||
+        second.adjacentRoomNumbers.contains(first.number);
+  }
+
+  bool _isAdjacentToAny(GuestRoomSpec room, Set<int> roomNumbers) {
+    for (final roomNumber in roomNumbers) {
+      final assignedRoom = _roomByNumber(roomNumber);
+      if (assignedRoom != null && _areAdjacent(assignedRoom, room)) return true;
+    }
+    return false;
+  }
+
+  int _distanceToAny(GuestRoomSpec room, Set<int> roomNumbers) {
+    var minimum = 1 << 30;
+    for (final roomNumber in roomNumbers) {
+      final distance = (room.number - roomNumber).abs();
+      if (distance < minimum) minimum = distance;
+    }
+    return minimum;
+  }
+
+  static String _roomTypeKey(String value) {
+    return value.trim().toLowerCase().replaceAll(RegExp(r'[\s　・\-_/]+'), '');
   }
 
   GuestRoomSpec? _roomByNumber(int roomNumber) {
@@ -642,9 +730,14 @@ class RoomAssignmentService {
 }
 
 class _RequestedRoom {
-  const _RequestedRoom({required this.type, this.specifiedGuests});
+  const _RequestedRoom({
+    required this.roomTypeKey,
+    required this.fallbackType,
+    this.specifiedGuests,
+  });
 
-  final GuestRoomType type;
+  final String? roomTypeKey;
+  final GuestRoomType fallbackType;
   final int? specifiedGuests;
 }
 

@@ -127,7 +127,7 @@ class CheckinSheetPrintService {
               pw.Table(
                 border: pw.TableBorder.all(width: 0.8),
                 columnWidths: const {
-                  0: pw.FixedColumnWidth(28),
+                  0: pw.FixedColumnWidth(45),
                   1: pw.FlexColumnWidth(2.3),
                   2: pw.FixedColumnWidth(32),
                   3: pw.FixedColumnWidth(28),
@@ -247,8 +247,9 @@ class CheckinSheetPrintService {
       ),
       children: [
         _cell(
-          '${row.roomNumber}',
+          facilitySettings.roomByNumber(row.roomNumber).displayName,
           height: rowHeight,
+          fontSize: 7.2,
           bold: true,
           alignment: pw.Alignment.center,
         ),

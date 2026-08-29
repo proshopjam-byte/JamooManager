@@ -76,7 +76,7 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
         .map((room) => int.parse(room.numberController.text.trim()))
         .toList();
     if (roomNumbers.toSet().length != roomNumbers.length) {
-      _showMessage('同じ部屋番号が複数あります。');
+      _showMessage('同じ管理番号が複数あります。');
       return;
     }
     if (_rooms.isEmpty) {
@@ -90,6 +90,19 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
 
     final rooms = _rooms.map((editor) => editor.toRoom()).toList()
       ..sort((first, second) => first.number.compareTo(second.number));
+    final registeredRoomNumbers = rooms.map((room) => room.number).toSet();
+    for (final room in rooms) {
+      for (final adjacent in room.adjacentRoomNumbers) {
+        if (adjacent == room.number) {
+          _showMessage('管理番号${room.number}の隣室に同じ番号は指定できません。');
+          return;
+        }
+        if (!registeredRoomNumbers.contains(adjacent)) {
+          _showMessage('管理番号${room.number}の隣室「$adjacent」が客室設定にありません。');
+          return;
+        }
+      }
+    }
     final settings = FacilitySettings(
       facilityName: _facilityNameController.text.trim(),
       address: _addressController.text.trim(),
@@ -142,10 +155,11 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
         _RoomEditor.fromRoom(
           GuestRoomSpec(
             number: nextNumber,
-            label: 'ツイン',
+            roomName: '',
+            label: '客室タイプ',
             normalCapacity: 2,
-            capacity: 3,
-            type: GuestRoomType.standardTwin,
+            capacity: 2,
+            type: GuestRoomType.other,
           ),
         ),
       );
@@ -313,10 +327,13 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
             const SizedBox(height: 4),
             const Text(
               '小規模施設向けに最大15室まで登録できます。'
+              '管理番号は並び順と隣室指定に使う数字です。'
+              '部屋番号・名前には「101号室」「白樺」など、'
+              '実際に表示する名前を入力できます。'
               '部屋タイプ名は自由入力でき、客室ごとに人数を設定できます。'
               '通常人数は自動部屋割りで使う人数、'
               '最大定員はお子様を含め手動で選択できる上限です。'
-              '独自の部屋タイプは自動部屋割り分類で「その他」を選択してください。',
+              '隣室を設定すると、グループ予約で近い部屋を優先します。',
             ),
             const SizedBox(height: 12),
             for (var index = 0; index < _rooms.length; index++)
@@ -345,31 +362,45 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   SizedBox(
-                    width: 100,
+                    width: 110,
                     child: TextFormField(
                       controller: room.numberController,
                       keyboardType: TextInputType.number,
                       decoration: const InputDecoration(
-                        labelText: '部屋番号',
-                        suffixText: '号室',
+                        labelText: '管理番号',
                         border: OutlineInputBorder(),
                       ),
                       validator: _positiveIntegerValidator,
                     ),
                   ),
                   SizedBox(
-                    width: 190,
+                    width: 150,
+                    child: TextFormField(
+                      controller: room.roomNameController,
+                      decoration: InputDecoration(
+                        labelText: '部屋番号・名前',
+                        hintText: '例：101号室・白樺',
+                        border: const OutlineInputBorder(),
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    width: 170,
                     child: DropdownButtonFormField<GuestRoomType>(
                       initialValue: room.type,
+                      isExpanded: true,
                       decoration: const InputDecoration(
-                        labelText: '自動部屋割り分類',
+                        labelText: '人数・料金区分',
                         border: OutlineInputBorder(),
                       ),
                       items: [
                         for (final type in GuestRoomType.values)
                           DropdownMenuItem(
                             value: type,
-                            child: Text(type.label),
+                            child: Text(
+                              type.label,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                       ],
                       onChanged: (value) {
@@ -434,6 +465,19 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
                       validator: _positiveIntegerValidator,
                     ),
                   ),
+                  SizedBox(
+                    width: 170,
+                    child: TextFormField(
+                      controller: room.adjacentRoomsController,
+                      keyboardType: TextInputType.text,
+                      decoration: const InputDecoration(
+                        labelText: '隣室の管理番号',
+                        hintText: '例：3, 4',
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: _optionalRoomNumbersValidator,
+                    ),
+                  ),
                   FilterChip(
                     label: Text(room.isAvailable ? '使用可' : '使用不可'),
                     selected: room.isAvailable,
@@ -461,6 +505,18 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
     final parsed = int.tryParse(value?.trim() ?? '');
     if (parsed == null || parsed <= 0) {
       return '1以上の数字';
+    }
+    return null;
+  }
+
+  static String? _optionalRoomNumbersValidator(String? value) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) return null;
+    for (final part in text.split(RegExp(r'[,、\s]+'))) {
+      final parsed = int.tryParse(part);
+      if (parsed == null || parsed <= 0) {
+        return '管理番号をカンマ区切りで入力';
+      }
     }
     return null;
   }
@@ -722,9 +778,11 @@ class _FacilitySettingsPageState extends State<FacilitySettingsPage> {
 class _RoomEditor {
   _RoomEditor({
     required this.numberController,
+    required this.roomNameController,
     required this.labelController,
     required this.normalCapacityController,
     required this.capacityController,
+    required this.adjacentRoomsController,
     required this.type,
     required this.isAvailable,
   });
@@ -732,39 +790,54 @@ class _RoomEditor {
   factory _RoomEditor.fromRoom(GuestRoomSpec room) {
     return _RoomEditor(
       numberController: TextEditingController(text: '${room.number}'),
+      roomNameController: TextEditingController(text: room.roomName),
       labelController: TextEditingController(text: room.label),
       normalCapacityController: TextEditingController(
         text: '${room.normalCapacity}',
       ),
       capacityController: TextEditingController(text: '${room.capacity}'),
+      adjacentRoomsController: TextEditingController(
+        text: room.adjacentRoomNumbers.join(', '),
+      ),
       type: room.type,
       isAvailable: room.isAvailable,
     );
   }
 
   final TextEditingController numberController;
+  final TextEditingController roomNameController;
   final TextEditingController labelController;
   final TextEditingController normalCapacityController;
   final TextEditingController capacityController;
+  final TextEditingController adjacentRoomsController;
   GuestRoomType type;
   bool isAvailable;
 
   GuestRoomSpec toRoom() {
     return GuestRoomSpec(
       number: int.parse(numberController.text.trim()),
+      roomName: roomNameController.text.trim(),
       label: labelController.text.trim(),
       normalCapacity: int.parse(normalCapacityController.text.trim()),
       capacity: int.parse(capacityController.text.trim()),
       type: type,
       isAvailable: isAvailable,
+      adjacentRoomNumbers: adjacentRoomsController.text
+          .split(RegExp(r'[,、\s]+'))
+          .map((value) => int.tryParse(value))
+          .whereType<int>()
+          .toSet()
+          .toList(growable: false),
     );
   }
 
   void dispose() {
     numberController.dispose();
+    roomNameController.dispose();
     labelController.dispose();
     normalCapacityController.dispose();
     capacityController.dispose();
+    adjacentRoomsController.dispose();
   }
 }
 
