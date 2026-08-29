@@ -4,10 +4,34 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart' show Database;
 
 import '../models/reservation.dart';
 import '../models/reservation_data.dart';
+import '../models/daily_operations.dart';
 import '../services/database_service.dart';
 
 class DatabaseReservationRepository {
   const DatabaseReservationRepository();
+
+  Future<void> saveArrivalTime({
+    required String source,
+    required String reservationNumber,
+    required String? arrivalTime,
+  }) async {
+    final db = await DatabaseService.instance.database;
+    final normalized = arrivalTime?.trim();
+    final updated = await db.update(
+      'reservations',
+      {
+        'arrival_time': normalized == null || normalized.isEmpty
+            ? null
+            : normalized,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      },
+      where: 'source = ? AND external_reservation_id = ?',
+      whereArgs: [source, reservationNumber],
+    );
+    if (updated == 0) {
+      throw StateError('到着時間を保存する予約が見つかりません。');
+    }
+  }
 
   Future<void> saveMealOverride({
     required String source,
@@ -214,6 +238,55 @@ class DatabaseReservationRepository {
       targetDate: targetDate,
       count: reservations.length,
       reservations: reservations,
+    );
+  }
+
+  Future<ReservationData> loadCheckOutsForDate(DateTime date) async {
+    final targetDate = DateTime(date.year, date.month, date.day);
+    final targetText = _formatDate(targetDate);
+    final db = await DatabaseService.instance.database;
+
+    final rows = await db.rawQuery(
+      'SELECT r.*, '
+      'm.has_breakfast AS override_has_breakfast, '
+      'm.has_dinner AS override_has_dinner '
+      'FROM reservations r '
+      'LEFT JOIN reservation_meal_overrides m ON m.reservation_id = r.id '
+      'WHERE r.check_out = ? AND '
+      "LOWER(r.status) NOT IN ('cancelled', 'canceled') "
+      'ORDER BY r.guest_name COLLATE NOCASE ASC',
+      [targetText],
+    );
+
+    final reservations = rows.map(_reservationFromRow).toList(growable: false);
+    final generatedAt = await _lastImportAt(db);
+
+    return ReservationData(
+      schemaVersion: 1,
+      generatedAt: generatedAt,
+      source: 'All',
+      scope: 'today_checkouts',
+      targetDate: targetDate,
+      count: reservations.length,
+      reservations: reservations,
+    );
+  }
+
+  Future<DailyOperationsData> loadDailyOperationsForDate(DateTime date) async {
+    final results = await Future.wait<ReservationData>([
+      loadCheckInsForDate(date),
+      loadStaysForDate(date),
+      loadCheckOutsForDate(date),
+    ]);
+    return DailyOperationsData(
+      date: DateTime(date.year, date.month, date.day),
+      generatedAt:
+          results[0].generatedAt ??
+          results[1].generatedAt ??
+          results[2].generatedAt,
+      arrivals: results[0].sortedByCheckIn,
+      occupiedTonight: results[1].sortedByCheckIn,
+      departures: results[2].sortedByCheckIn,
     );
   }
 

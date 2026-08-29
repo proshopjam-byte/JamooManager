@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'models/app_settings.dart';
+import 'models/daily_operations.dart';
 import 'models/reservation.dart';
-import 'models/reservation_data.dart';
 import 'pages/customer_list_page.dart';
 import 'pages/checkin_sheet_page.dart';
 import 'pages/reservation_calendar_page.dart';
@@ -48,7 +48,7 @@ class TodayCheckInPage extends StatefulWidget {
 class _TodayCheckInPageState extends State<TodayCheckInPage> {
   final SettingsRepository _settingsRepository = const SettingsRepository();
 
-  Future<ReservationData>? _reservationDataFuture;
+  Future<DailyOperationsData>? _operationsFuture;
   DateTime _selectedDate = DateTime.now();
 
   AppSettings _settings = AppSettings.defaults;
@@ -63,8 +63,8 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
     );
   }
 
-  Future<ReservationData> _loadSelectedDateCheckIns() {
-    return const DatabaseReservationRepository().loadCheckInsForDate(
+  Future<DailyOperationsData> _loadSelectedDateOperations() {
+    return const DatabaseReservationRepository().loadDailyOperationsForDate(
       _selectedDate,
     );
   }
@@ -100,7 +100,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
       setState(() {
         _settings = settings;
         _isLoadingSettings = false;
-        _reservationDataFuture = _loadSelectedDateCheckIns();
+        _operationsFuture = _loadSelectedDateOperations();
       });
     } on SettingsRepositoryException catch (error) {
       if (!mounted) {
@@ -110,7 +110,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
       setState(() {
         _settings = AppSettings.defaults;
         _isLoadingSettings = false;
-        _reservationDataFuture = _loadSelectedDateCheckIns();
+        _operationsFuture = _loadSelectedDateOperations();
       });
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -126,7 +126,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
       setState(() {
         _settings = AppSettings.defaults;
         _isLoadingSettings = false;
-        _reservationDataFuture = _loadSelectedDateCheckIns();
+        _operationsFuture = _loadSelectedDateOperations();
       });
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -183,7 +183,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
 
     setState(() {
       _selectedDate = DateTime(nextDate.year, nextDate.month, nextDate.day);
-      _reservationDataFuture = _loadSelectedDateCheckIns();
+      _operationsFuture = _loadSelectedDateOperations();
     });
   }
 
@@ -196,7 +196,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
 
     setState(() {
       _selectedDate = DateTime(now.year, now.month, now.day);
-      _reservationDataFuture = _loadSelectedDateCheckIns();
+      _operationsFuture = _loadSelectedDateOperations();
     });
   }
 
@@ -206,7 +206,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
     }
 
     setState(() {
-      _reservationDataFuture = _loadSelectedDateCheckIns();
+      _operationsFuture = _loadSelectedDateOperations();
     });
   }
 
@@ -225,7 +225,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
 
     setState(() {
       _settings = updatedSettings;
-      _reservationDataFuture = _loadSelectedDateCheckIns();
+      _operationsFuture = _loadSelectedDateOperations();
     });
 
     ScaffoldMessenger.of(
@@ -289,7 +289,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
       }
 
       setState(() {
-        _reservationDataFuture = _loadSelectedDateCheckIns();
+        _operationsFuture = _loadSelectedDateOperations();
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -345,7 +345,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
       }
 
       setState(() {
-        _reservationDataFuture = _loadSelectedDateCheckIns();
+        _operationsFuture = _loadSelectedDateOperations();
       });
 
       if (syncResult.failed > 0) {
@@ -408,7 +408,7 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
         return;
       }
       setState(() {
-        _reservationDataFuture = _loadSelectedDateCheckIns();
+        _operationsFuture = _loadSelectedDateOperations();
       });
       if (syncResult.failed > 0) {
         await _showErrorDialog(
@@ -453,6 +453,81 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
     }
   }
 
+  Future<void> _editArrivalTime(Reservation reservation) async {
+    final reservationNumber = reservation.reservationNumber?.trim();
+    if (reservationNumber == null || reservationNumber.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('予約番号がないため到着時間を保存できません。')));
+      return;
+    }
+
+    final controller = TextEditingController(
+      text: reservation.arrivalTime?.trim() ?? '',
+    );
+    final result = await showDialog<_ArrivalTimeEditResult>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${reservation.displayGuestName}様の到着時間'),
+        content: SizedBox(
+          width: 360,
+          child: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: const InputDecoration(
+              labelText: '到着予定',
+              hintText: '例：15:00、15:00〜16:00、未定',
+              border: OutlineInputBorder(),
+            ),
+            onSubmitted: (value) =>
+                Navigator.of(context).pop(_ArrivalTimeEditResult(value)),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('キャンセル'),
+          ),
+          TextButton(
+            onPressed: () =>
+                Navigator.of(context).pop(const _ArrivalTimeEditResult(null)),
+            child: const Text('未設定に戻す'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(
+              context,
+            ).pop(_ArrivalTimeEditResult(controller.text)),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (result == null || !mounted) return;
+
+    try {
+      await const DatabaseReservationRepository().saveArrivalTime(
+        source: reservation.source,
+        reservationNumber: reservationNumber,
+        arrivalTime: result.value,
+      );
+      if (!mounted) return;
+      _reload();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result.value?.trim().isNotEmpty == true
+                ? '到着時間を保存しました。'
+                : '到着時間を未設定に戻しました。',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      await _showErrorDialog(title: '到着時間を保存できませんでした', message: '$error');
+    }
+  }
+
   Future<void> _showErrorDialog({
     required String title,
     required String message,
@@ -484,8 +559,8 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
       appBar: AppBar(
         title: Text(
           _isViewingToday
-              ? '本日のチェックイン'
-              : '${_formatDate(_selectedDate)}のチェックイン',
+              ? '本日の運営ダッシュボード'
+              : '${_formatDate(_selectedDate)}の運営ダッシュボード',
         ),
         actions: [
           IconButton(
@@ -573,11 +648,11 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
       ),
       body: Stack(
         children: [
-          if (_isLoadingSettings || _reservationDataFuture == null)
+          if (_isLoadingSettings || _operationsFuture == null)
             const _LoadingView()
           else
-            FutureBuilder<ReservationData>(
-              future: _reservationDataFuture,
+            FutureBuilder<DailyOperationsData>(
+              future: _operationsFuture,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const _LoadingView();
@@ -589,23 +664,17 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
 
                 final data = snapshot.data;
 
-                if (data == null || data.isEmpty) {
-                  return _EmptyView(
-                    settings: _settings,
-                    targetDate: data?.targetDate ?? _selectedDate,
-                    generatedAt: data?.generatedAt,
-                    onReload: _reload,
-                    onSync: _syncFromBooking,
-                    isSyncing: _isSyncing,
-                  );
+                if (data == null) {
+                  return _ErrorView(error: '運営データが空です。', onRetry: _reload);
                 }
 
-                return _TodayCheckInBody(
+                return _TodayOperationsBody(
                   data: data,
                   settings: _settings,
                   onReload: _reload,
                   onSync: _syncFromBooking,
                   isSyncing: _isSyncing,
+                  onEditArrivalTime: _editArrivalTime,
                 );
               },
             ),
@@ -614,6 +683,12 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
       ),
     );
   }
+}
+
+class _ArrivalTimeEditResult {
+  const _ArrivalTimeEditResult(this.value);
+
+  final String? value;
 }
 
 class _SyncingBanner extends StatelessWidget {
@@ -664,7 +739,7 @@ class _LoadingView extends StatelessWidget {
         children: [
           CircularProgressIndicator(),
           SizedBox(height: 16),
-          Text('設定と本日のチェックインを読み込んでいます…'),
+          Text('設定と本日の運営情報を読み込んでいます…'),
         ],
       ),
     );
@@ -701,7 +776,7 @@ class _ErrorView extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    '本日のチェックインを開けませんでした',
+                    '運営ダッシュボードを開けませんでした',
                     style: Theme.of(context).textTheme.headlineSmall,
                     textAlign: TextAlign.center,
                   ),
@@ -723,125 +798,25 @@ class _ErrorView extends StatelessWidget {
   }
 }
 
-class _EmptyView extends StatelessWidget {
-  const _EmptyView({
-    required this.settings,
-    required this.targetDate,
-    required this.generatedAt,
-    required this.onReload,
-    required this.onSync,
-    required this.isSyncing,
-  });
-
-  final AppSettings settings;
-  final DateTime targetDate;
-  final DateTime? generatedAt;
-  final VoidCallback onReload;
-  final VoidCallback onSync;
-  final bool isSyncing;
-
-  @override
-  Widget build(BuildContext context) {
-    final targetDateText = _formatDate(targetDate) ?? _formatToday();
-    final now = DateTime.now();
-    final isToday =
-        targetDate.year == now.year &&
-        targetDate.month == now.month &&
-        targetDate.day == now.day;
-    final generatedAtText = _formatDateTime(generatedAt);
-
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 650),
-          child: Card(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    settings.facilityName,
-                    style: Theme.of(context).textTheme.titleLarge,
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 18),
-                  Icon(
-                    Icons.event_available,
-                    size: 72,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                  const SizedBox(height: 18),
-                  Text(
-                    targetDateText,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    isToday ? '本日のチェックインは0件です' : 'この日のチェックインは0件です',
-                    style: Theme.of(context).textTheme.headlineSmall,
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    isToday ? '本日到着予定のお客様はいません。' : 'この日に到着予定のお客様はいません。',
-                    textAlign: TextAlign.center,
-                  ),
-                  if (generatedAtText != null) ...[
-                    const SizedBox(height: 20),
-                    Text(
-                      '最終取得：$generatedAtText',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                  const SizedBox(height: 26),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    alignment: WrapAlignment.center,
-                    children: [
-                      FilledButton.icon(
-                        onPressed: isSyncing ? null : onSync,
-                        icon: const Icon(Icons.cloud_download_outlined),
-                        label: Text('${settings.bookingSourceName}から取得'),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: isSyncing ? null : onReload,
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('一覧を再読込'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _TodayCheckInBody extends StatelessWidget {
-  const _TodayCheckInBody({
+class _TodayOperationsBody extends StatelessWidget {
+  const _TodayOperationsBody({
     required this.data,
     required this.settings,
     required this.onReload,
     required this.onSync,
     required this.isSyncing,
+    required this.onEditArrivalTime,
   });
 
-  final ReservationData data;
+  final DailyOperationsData data;
   final AppSettings settings;
   final VoidCallback onReload;
   final VoidCallback onSync;
   final bool isSyncing;
+  final Future<void> Function(Reservation) onEditArrivalTime;
 
   @override
   Widget build(BuildContext context) {
-    final reservations = data.sortedByCheckIn;
-
     return RefreshIndicator(
       onRefresh: () async {
         onReload();
@@ -849,107 +824,155 @@ class _TodayCheckInBody extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 90),
         children: [
-          if (!data.isTodayCheckIns || data.isStale) ...[
-            _OldDataWarning(
-              data: data,
+          if (data.isStale) ...[
+            _OperationsDataWarning(
+              generatedAt: data.generatedAt,
               bookingSourceName: settings.bookingSourceName,
               onSync: onSync,
               isSyncing: isSyncing,
             ),
             const SizedBox(height: 16),
           ],
-          _SummaryPanel(data: data, settings: settings),
+          _OperationsSummaryPanel(data: data, settings: settings),
           const SizedBox(height: 18),
-          Text(
-            data.isForToday ? '本日到着のお客様' : 'この日に到着のお客様',
-            style: Theme.of(context).textTheme.titleLarge,
+          _OperationSection(
+            title: 'チェックアウト',
+            description: '朝の対応・清掃準備を確認',
+            icon: Icons.logout,
+            reservations: data.departures,
+            settings: settings,
+            emptyMessage: '本日のチェックアウトはありません',
+            showCheckinCard: false,
           ),
-          const SizedBox(height: 10),
-          for (final reservation in reservations) ...[
-            _ReservationCard(reservation: reservation, settings: settings),
-            const SizedBox(height: 10),
-          ],
+          const SizedBox(height: 18),
+          _OperationSection(
+            title: '連泊中',
+            description: '今日も宿泊するお客様',
+            icon: Icons.hotel_outlined,
+            reservations: data.stayovers,
+            settings: settings,
+            emptyMessage: '連泊中のお客様はいません',
+            showCheckinCard: false,
+          ),
+          const SizedBox(height: 18),
+          _OperationSection(
+            title: 'チェックイン',
+            description: '到着時間・食事・料金を確認',
+            icon: Icons.login,
+            reservations: data.arrivals,
+            settings: settings,
+            emptyMessage: '本日のチェックインはありません',
+            showCheckinCard: true,
+            showReview: true,
+            onEditArrivalTime: onEditArrivalTime,
+          ),
         ],
       ),
     );
   }
 }
 
-class _OldDataWarning extends StatelessWidget {
-  const _OldDataWarning({
-    required this.data,
+class _OperationSection extends StatelessWidget {
+  const _OperationSection({
+    required this.title,
+    required this.description,
+    required this.icon,
+    required this.reservations,
+    required this.settings,
+    required this.emptyMessage,
+    required this.showCheckinCard,
+    this.showReview = false,
+    this.onEditArrivalTime,
+  });
+
+  final String title;
+  final String description;
+  final IconData icon;
+  final List<Reservation> reservations;
+  final AppSettings settings;
+  final String emptyMessage;
+  final bool showCheckinCard;
+  final bool showReview;
+  final Future<void> Function(Reservation)? onEditArrivalTime;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, color: Theme.of(context).colorScheme.primary),
+            const SizedBox(width: 8),
+            Text(title, style: Theme.of(context).textTheme.titleLarge),
+            const SizedBox(width: 10),
+            Text('${reservations.length}件'),
+          ],
+        ),
+        const SizedBox(height: 2),
+        Text(description, style: Theme.of(context).textTheme.bodySmall),
+        const SizedBox(height: 10),
+        if (reservations.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surfaceContainerLow,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(emptyMessage),
+          )
+        else
+          for (final reservation in reservations) ...[
+            _ReservationCard(
+              reservation: reservation,
+              settings: settings,
+              showCheckinCard: showCheckinCard,
+              showReview: showReview,
+              onEditArrivalTime: onEditArrivalTime,
+            ),
+            const SizedBox(height: 10),
+          ],
+      ],
+    );
+  }
+}
+
+class _OperationsDataWarning extends StatelessWidget {
+  const _OperationsDataWarning({
+    required this.generatedAt,
     required this.bookingSourceName,
     required this.onSync,
     required this.isSyncing,
   });
 
-  final ReservationData data;
+  final DateTime? generatedAt;
   final String bookingSourceName;
-
   final VoidCallback onSync;
   final bool isSyncing;
 
   @override
   Widget build(BuildContext context) {
-    final generatedAtText = _formatDateTime(data.generatedAt);
-
-    final reasons = <String>[];
-
-    if (!data.isTodayCheckIns) {
-      reasons.add('表示データが「当日チェックイン専用」の形式ではありません。');
-    }
-
-    if (data.isStale) {
-      reasons.add(
-        generatedAtText == null
-            ? '最終取得日時を確認できません。'
-            : '最終取得は $generatedAtText です。',
-      );
-    }
-
     return Card(
       color: Theme.of(context).colorScheme.errorContainer,
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(
-              Icons.warning_amber_rounded,
-              size: 30,
-              color: Theme.of(context).colorScheme.onErrorContainer,
-            ),
+            const Icon(Icons.warning_amber_rounded, size: 30),
             const SizedBox(width: 14),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '予約データの取得状況を確認してください',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Theme.of(context).colorScheme.onErrorContainer,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  for (final reason in reasons)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Text(
-                        '・$reason',
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.onErrorContainer,
-                        ),
-                      ),
-                    ),
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: isSyncing ? null : onSync,
-                    icon: const Icon(Icons.cloud_download_outlined),
-                    label: Text('$bookingSourceNameから本日分を取得'),
-                  ),
-                ],
+              child: Text(
+                generatedAt == null
+                    ? '最終取得日時を確認できません。予約を再取得してください。'
+                    : '最終取得は ${_formatDateTime(generatedAt)} です。最新の予約を確認してください。',
               ),
+            ),
+            const SizedBox(width: 12),
+            FilledButton.icon(
+              onPressed: isSyncing ? null : onSync,
+              icon: const Icon(Icons.cloud_download_outlined),
+              label: Text('$bookingSourceNameから取得'),
             ),
           ],
         ),
@@ -958,10 +981,10 @@ class _OldDataWarning extends StatelessWidget {
   }
 }
 
-class _SummaryPanel extends StatelessWidget {
-  const _SummaryPanel({required this.data, required this.settings});
+class _OperationsSummaryPanel extends StatelessWidget {
+  const _OperationsSummaryPanel({required this.data, required this.settings});
 
-  final ReservationData data;
+  final DailyOperationsData data;
   final AppSettings settings;
 
   @override
@@ -984,7 +1007,7 @@ class _SummaryPanel extends StatelessWidget {
                 Icon(Icons.login, color: Theme.of(context).colorScheme.primary),
                 const SizedBox(width: 8),
                 Text(
-                  _formatDate(data.targetDate) ?? _formatToday(),
+                  _formatDate(data.date) ?? _formatToday(),
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
               ],
@@ -995,21 +1018,41 @@ class _SummaryPanel extends StatelessWidget {
               runSpacing: 12,
               children: [
                 _SummaryItem(
-                  label: 'チェックイン',
-                  value: '${data.reservations.length}件',
-                  icon: Icons.event_note,
+                  label: 'チェックアウト',
+                  value: '${data.departures.length}件・${data.departureGuests}名',
+                  icon: Icons.logout,
                 ),
                 _SummaryItem(
-                  label: '宿泊人数',
-                  value: '${data.totalGuests}名',
-                  icon: Icons.people_alt_outlined,
+                  label: '連泊',
+                  value: '${data.stayovers.length}件・${data.stayoverGuests}名',
+                  icon: Icons.hotel_outlined,
                 ),
-                if (settings.showPrice)
-                  _SummaryItem(
-                    label: '予約金額',
-                    value: _formatYen(data.totalPriceYen),
-                    icon: Icons.payments_outlined,
-                  ),
+                _SummaryItem(
+                  label: 'チェックイン',
+                  value: '${data.arrivals.length}件・${data.arrivalGuests}名',
+                  icon: Icons.login,
+                ),
+                _SummaryItem(
+                  label: '今夜の宿泊',
+                  value: '${data.occupiedRooms}室・${data.occupiedGuests}名',
+                  icon: Icons.bed_outlined,
+                ),
+                _SummaryItem(
+                  label: '朝食',
+                  value: '${data.breakfastGuests}名',
+                  icon: Icons.free_breakfast_outlined,
+                ),
+                _SummaryItem(
+                  label: '夕食',
+                  value: '${data.dinnerGuests}名',
+                  icon: Icons.restaurant_outlined,
+                ),
+                _SummaryItem(
+                  label: '要確認',
+                  value: '${data.reviewCount}件',
+                  icon: Icons.fact_check_outlined,
+                  emphasize: data.reviewCount > 0,
+                ),
               ],
             ),
             if (generatedAtText != null) ...[
@@ -1031,11 +1074,13 @@ class _SummaryItem extends StatelessWidget {
     required this.label,
     required this.value,
     required this.icon,
+    this.emphasize = false,
   });
 
   final String label;
   final String value;
   final IconData icon;
+  final bool emphasize;
 
   @override
   Widget build(BuildContext context) {
@@ -1043,7 +1088,9 @@ class _SummaryItem extends StatelessWidget {
       constraints: const BoxConstraints(minWidth: 150),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        color: emphasize
+            ? Theme.of(context).colorScheme.errorContainer
+            : Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -1065,15 +1112,27 @@ class _SummaryItem extends StatelessWidget {
 }
 
 class _ReservationCard extends StatelessWidget {
-  const _ReservationCard({required this.reservation, required this.settings});
+  const _ReservationCard({
+    required this.reservation,
+    required this.settings,
+    this.showCheckinCard = true,
+    this.showReview = false,
+    this.onEditArrivalTime,
+  });
 
   final Reservation reservation;
   final AppSettings settings;
+  final bool showCheckinCard;
+  final bool showReview;
+  final Future<void> Function(Reservation)? onEditArrivalTime;
 
   @override
   Widget build(BuildContext context) {
     final arrivalTime = reservation.arrivalTime?.trim();
     final reservationNumber = reservation.reservationNumber?.trim();
+    final reviewReasons = showReview
+        ? DailyOperationsData.reviewReasons(reservation)
+        : const <String>[];
 
     return Card(
       clipBehavior: Clip.antiAlias,
@@ -1142,29 +1201,65 @@ class _ReservationCard extends StatelessWidget {
               icon: Icons.restaurant_menu,
               label: _mealLabel(reservation),
             ),
-            const SizedBox(height: 14),
-            Align(
-              alignment: Alignment.centerRight,
-              child: OutlinedButton.icon(
-                onPressed: () async {
-                  try {
-                    await const CheckinCardPrintService().previewCard(
-                      context,
-                      reservation,
-                    );
-                  } catch (error) {
-                    if (!context.mounted) {
-                      return;
-                    }
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('PDFの作成に失敗しました: $error')),
-                    );
-                  }
-                },
-                icon: const Icon(Icons.print_outlined),
-                label: const Text('チェックインカード'),
+            if (reviewReasons.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.errorContainer,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text('要確認：${reviewReasons.join('・')}'),
               ),
-            ),
+            ],
+            if (showCheckinCard || onEditArrivalTime != null) ...[
+              const SizedBox(height: 14),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Wrap(
+                  spacing: 10,
+                  runSpacing: 8,
+                  children: [
+                    if (onEditArrivalTime != null)
+                      FilledButton.tonalIcon(
+                        onPressed: () async {
+                          await onEditArrivalTime!(reservation);
+                        },
+                        icon: const Icon(Icons.schedule),
+                        label: Text(
+                          arrivalTime == null || arrivalTime.isEmpty
+                              ? '到着時間を設定'
+                              : '到着時間を変更',
+                        ),
+                      ),
+                    if (showCheckinCard)
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          try {
+                            await const CheckinCardPrintService().previewCard(
+                              context,
+                              reservation,
+                            );
+                          } catch (error) {
+                            if (!context.mounted) {
+                              return;
+                            }
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('PDFの作成に失敗しました: $error')),
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.print_outlined),
+                        label: const Text('チェックインカード'),
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -1249,21 +1344,4 @@ String? _formatDateTime(DateTime? value) {
   final minute = local.minute.toString().padLeft(2, '0');
 
   return '$year/$month/$day $hour:$minute';
-}
-
-String _formatYen(int value) {
-  final digits = value.abs().toString();
-  final buffer = StringBuffer();
-
-  for (var index = 0; index < digits.length; index++) {
-    if (index > 0 && (digits.length - index) % 3 == 0) {
-      buffer.write(',');
-    }
-
-    buffer.write(digits[index]);
-  }
-
-  final amount = value < 0 ? '-${buffer.toString()}' : buffer.toString();
-
-  return '¥$amount';
 }
