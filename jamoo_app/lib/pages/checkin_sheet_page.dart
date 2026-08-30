@@ -67,7 +67,9 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
         rooms: facilitySettings.rooms,
         stayDate: widget.date,
       );
-      final data = await _reservationRepository.loadStaysForDate(widget.date);
+      final data = await _reservationRepository.loadStaysForDate(
+        widget.date,
+      );
       final savedRows = await _sheetRepository.load(
         widget.date,
         rooms: facilitySettings.rooms,
@@ -254,7 +256,10 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
         )
         .fold<int>(0, (sum, entry) => sum + entry.value.guestCount);
     final remaining =
-        RoomAssignmentService.guestCount(reservation) - assignedElsewhere;
+        RoomAssignmentService.guestCount(
+          reservation,
+          stayDate: widget.date,
+        ) - assignedElsewhere;
     final room = _facilitySettings.roomByNumber(_rows[index].roomNumber);
     final count = remaining <= 0
         ? 1
@@ -502,7 +507,10 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
                           ),
                           child: Text(
                             '${reservation.displayGuestName} '
-                            '(${RoomAssignmentService.guestCount(reservation)}名)',
+                            '(${RoomAssignmentService.guestCount(
+                              reservation,
+                              stayDate: widget.date,
+                            )}名)',
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
@@ -523,9 +531,10 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
                     ),
                     initialValue: row.guestCount,
                     isExpanded: true,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       isDense: true,
-                      border: OutlineInputBorder(),
+                      labelText: row.guestCountManuallyChanged ? '手動' : null,
+                      border: const OutlineInputBorder(),
                     ),
                     items: [
                       for (var count = 0; count <= guestMaximum; count++)
@@ -535,7 +544,10 @@ class _CheckinSheetPageState extends State<CheckinSheetPage> {
                       if (value != null) {
                         _replaceRow(
                           index,
-                          row.copyWith(guestCount: value),
+                          row.copyWith(
+                            guestCount: value,
+                            guestCountManuallyChanged: true,
+                          ),
                           rebuild: true,
                         );
                       }

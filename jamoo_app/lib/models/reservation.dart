@@ -1,3 +1,61 @@
+class ReservationDailyGuestCount {
+  const ReservationDailyGuestCount({
+    required this.date,
+    required this.adults,
+    required this.childrenWithBed,
+    required this.childrenWithoutBed,
+  });
+
+  final DateTime date;
+  final int adults;
+  final int childrenWithBed;
+  final int childrenWithoutBed;
+
+  int get children => childrenWithBed + childrenWithoutBed;
+  int get totalGuests => adults + children;
+
+  bool isForDate(DateTime value) =>
+      date.year == value.year &&
+      date.month == value.month &&
+      date.day == value.day;
+
+  factory ReservationDailyGuestCount.fromJson(
+    Map<String, dynamic> json,
+  ) {
+    final date = DateTime.tryParse(json['date']?.toString() ?? '');
+    if (date == null) {
+      throw const FormatException('日別人数の日付が正しくありません。');
+    }
+    return ReservationDailyGuestCount(
+      date: DateTime(date.year, date.month, date.day),
+      adults: _readNonNegativeInt(json['adults']),
+      childrenWithBed: _readNonNegativeInt(json['childrenWithBed']),
+      childrenWithoutBed: _readNonNegativeInt(json['childrenWithoutBed']),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'date': _formatDateKey(date),
+    'adults': adults,
+    'childrenWithBed': childrenWithBed,
+    'childrenWithoutBed': childrenWithoutBed,
+  };
+
+  static int _readNonNegativeInt(Object? value) {
+    final parsed = value is num
+        ? value.toInt()
+        : int.tryParse(value?.toString() ?? '') ?? 0;
+    return parsed < 0 ? 0 : parsed;
+  }
+
+  static String _formatDateKey(DateTime value) {
+    final year = value.year.toString().padLeft(4, '0');
+    final month = value.month.toString().padLeft(2, '0');
+    final day = value.day.toString().padLeft(2, '0');
+    return '$year-$month-$day';
+  }
+}
+
 class Reservation {
   const Reservation({
     required this.id,
@@ -26,6 +84,7 @@ class Reservation {
     this.breakfastGuestCount,
     this.hasDinner,
     this.planName,
+    this.dailyGuestCounts = const [],
   });
 
   final String id;
@@ -54,6 +113,7 @@ class Reservation {
   final int? breakfastGuestCount;
   final bool? hasDinner;
   final String? planName;
+  final List<ReservationDailyGuestCount> dailyGuestCounts;
 
   factory Reservation.fromJson(Map<String, dynamic> json) {
     return Reservation(
@@ -83,6 +143,7 @@ class Reservation {
       breakfastGuestCount: _readNullableInt(json['breakfastGuestCount']),
       hasDinner: _readNullableBool(json['hasDinner']),
       planName: _readNullableString(json['planName']),
+      dailyGuestCounts: _readDailyGuestCounts(json['dailyGuestCounts']),
     );
   }
 
@@ -114,6 +175,9 @@ class Reservation {
       'breakfastGuestCount': breakfastGuestCount,
       'hasDinner': hasDinner,
       'planName': planName,
+      'dailyGuestCounts': dailyGuestCounts
+          .map((value) => value.toJson())
+          .toList(growable: false),
     };
   }
 
@@ -202,6 +266,14 @@ class Reservation {
     return '大人$adults名';
   }
 
+  String displayGuestCountOn(DateTime date) {
+    final guests = guestCountOn(date);
+    if (guests.children > 0) {
+      return '大人${guests.adults}名・子供${guests.children}名';
+    }
+    return '大人${guests.adults}名';
+  }
+
   /// True while this reservation occupies a room on [date].
   /// The check-in date is included and the checkout date is excluded.
   bool staysOn(DateTime date) {
@@ -210,6 +282,33 @@ class Reservation {
     final arrival = DateTime(checkIn!.year, checkIn!.month, checkIn!.day);
     final departure = DateTime(checkOut!.year, checkOut!.month, checkOut!.day);
     return !target.isBefore(arrival) && target.isBefore(departure);
+  }
+
+  ReservationDailyGuestCount guestCountOn(DateTime date) {
+    for (final value in dailyGuestCounts) {
+      if (value.isForDate(date)) return value;
+    }
+    final fallbackAdults = adults ?? 0;
+    final fallbackWithBed =
+        childrenWithBed ??
+        (childrenWithoutBed == null
+            ? children
+            : (children - childrenWithoutBed!)
+                  .clamp(0, children)
+                  .toInt());
+    final fallbackWithoutBed = childrenWithoutBed ?? 0;
+    return ReservationDailyGuestCount(
+      date: DateTime(date.year, date.month, date.day),
+      adults: fallbackAdults,
+      childrenWithBed: fallbackWithBed,
+      childrenWithoutBed: fallbackWithoutBed,
+    );
+  }
+
+  int totalGuestsOn(DateTime date) {
+    final daily = guestCountOn(date).totalGuests;
+    if (daily > 0) return daily;
+    return totalGuests ?? (adults ?? 0) + children;
   }
 
   String get displayPrice {
@@ -247,6 +346,7 @@ class Reservation {
     int? breakfastGuestCount,
     bool? hasDinner,
     String? planName,
+    List<ReservationDailyGuestCount>? dailyGuestCounts,
   }) {
     return Reservation(
       id: id ?? this.id,
@@ -275,6 +375,7 @@ class Reservation {
       breakfastGuestCount: breakfastGuestCount ?? this.breakfastGuestCount,
       hasDinner: hasDinner ?? this.hasDinner,
       planName: planName ?? this.planName,
+      dailyGuestCounts: dailyGuestCounts ?? this.dailyGuestCounts,
     );
   }
 
@@ -318,6 +419,27 @@ class Reservation {
     if (value == 1 || value == '1' || value == 'true') return true;
     if (value == 0 || value == '0' || value == 'false') return false;
     return null;
+  }
+
+  static List<ReservationDailyGuestCount> _readDailyGuestCounts(
+    Object? value,
+  ) {
+    if (value is! List) return const [];
+    final result = <ReservationDailyGuestCount>[];
+    for (final item in value) {
+      if (item is! Map) continue;
+      try {
+        result.add(
+          ReservationDailyGuestCount.fromJson(
+            Map<String, dynamic>.from(item),
+          ),
+        );
+      } on FormatException {
+        // Ignore one malformed legacy entry and keep loading the reservation.
+      }
+    }
+    result.sort((first, second) => first.date.compareTo(second.date));
+    return List.unmodifiable(result);
   }
 
   static DateTime? _readNullableDate(dynamic value) {

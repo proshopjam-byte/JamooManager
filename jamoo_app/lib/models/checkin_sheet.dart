@@ -62,8 +62,9 @@ class GuestRoomSpec {
 
   bool get isLoft => type == GuestRoomType.loft;
 
-  String get displayName =>
-      roomName.trim().isEmpty ? '$number号室' : roomName.trim();
+  String get displayName => roomName.trim().isEmpty
+      ? '$number号室'
+      : roomName.trim();
 
   String get typeLabel {
     if (!isAvailable) {
@@ -136,6 +137,7 @@ class CheckinSheetRow {
     required this.reservationNumber,
     required this.guestName,
     required this.guestCount,
+    this.guestCountManuallyChanged = false,
     required this.checkedIn,
     required this.amountYen,
     required this.payment,
@@ -154,6 +156,7 @@ class CheckinSheetRow {
       reservationNumber: null,
       guestName: '',
       guestCount: 0,
+      guestCountManuallyChanged: false,
       checkedIn: false,
       amountYen: null,
       payment: '',
@@ -171,6 +174,7 @@ class CheckinSheetRow {
   final String? reservationNumber;
   final String guestName;
   final int guestCount;
+  final bool guestCountManuallyChanged;
   final bool checkedIn;
   final int? amountYen;
   final String payment;
@@ -184,6 +188,7 @@ class CheckinSheetRow {
 
   CheckinSheetRow copyWith({
     int? guestCount,
+    bool? guestCountManuallyChanged,
     bool? checkedIn,
     int? amountYen,
     bool clearAmount = false,
@@ -201,6 +206,8 @@ class CheckinSheetRow {
       reservationNumber: reservationNumber,
       guestName: guestName,
       guestCount: guestCount ?? this.guestCount,
+      guestCountManuallyChanged:
+          guestCountManuallyChanged ?? this.guestCountManuallyChanged,
       checkedIn: checkedIn ?? this.checkedIn,
       amountYen: clearAmount ? null : amountYen ?? this.amountYen,
       payment: payment ?? this.payment,

@@ -49,6 +49,7 @@ class CheckinSheetRepository {
           'reservation_number': row.reservationNumber,
           'guest_name': row.guestName.trim(),
           'guest_count': row.guestCount,
+          'guest_count_manual': row.guestCountManuallyChanged ? 1 : 0,
           'checked_in': row.checkedIn ? 1 : 0,
           'amount_yen': row.amountYen,
           'payment': row.payment.trim(),
@@ -72,6 +73,8 @@ class CheckinSheetRepository {
       reservationNumber: _readNullableText(row['reservation_number']),
       guestName: _readText(row['guest_name']),
       guestCount: _readInt(row['guest_count']),
+      guestCountManuallyChanged:
+          _readInt(row['guest_count_manual']) != 0,
       checkedIn: _readInt(row['checked_in']) != 0,
       amountYen: _readNullableInt(row['amount_yen']),
       payment: _readText(row['payment']),

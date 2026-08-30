@@ -75,6 +75,7 @@ class _ReservationCalendarPageState extends State<ReservationCalendarPage> {
       adults: data.adults,
       childrenWithBed: data.childrenWithBed,
       childrenWithoutBed: data.childrenWithoutBed,
+      dailyGuestCounts: data.dailyGuestCounts,
       priceYen: data.priceYen,
       phone: data.phone,
       address: data.address,
@@ -520,11 +521,17 @@ class _CalendarDay extends StatelessWidget {
           0,
           (sum, reservation) =>
               sum +
-              (reservation.breakfastGuestCount ?? _guestCount(reservation)),
+              (reservation.dailyGuestCounts.isEmpty &&
+                      reservation.breakfastGuestCount != null
+                  ? reservation.breakfastGuestCount!
+                  : _guestCount(reservation, date)),
         );
     final dinnerGuests = reservations
         .where((reservation) => reservation.hasDinner == true)
-        .fold<int>(0, (sum, reservation) => sum + _guestCount(reservation));
+        .fold<int>(
+          0,
+          (sum, reservation) => sum + _guestCount(reservation, date),
+        );
 
     return InkWell(
       borderRadius: BorderRadius.circular(10),
@@ -745,9 +752,7 @@ class _SelectedDateReservations extends StatelessWidget {
         .where((reservation) => reservation.priceYen == null)
         .length;
     final totalGuests = reservations.fold<int>(0, (sum, reservation) {
-      final count =
-          reservation.totalGuests ??
-          (reservation.adults ?? 0) + reservation.children;
+      final count = reservation.totalGuestsOn(selectedDate);
       return sum + count;
     });
     final totalRooms = reservations.fold<int>(
@@ -764,7 +769,10 @@ class _SelectedDateReservations extends StatelessWidget {
           0,
           (sum, reservation) =>
               sum +
-              (reservation.breakfastGuestCount ?? _guestCount(reservation)),
+              (reservation.dailyGuestCounts.isEmpty &&
+                      reservation.breakfastGuestCount != null
+                  ? reservation.breakfastGuestCount!
+                  : _guestCount(reservation, selectedDate)),
         );
     final dinnerGuests = allReservations
         .where(
@@ -772,7 +780,11 @@ class _SelectedDateReservations extends StatelessWidget {
               reservation.hasDinner == true &&
               _staysOn(reservation, selectedDate),
         )
-        .fold<int>(0, (sum, reservation) => sum + _guestCount(reservation));
+        .fold<int>(
+          0,
+          (sum, reservation) =>
+              sum + _guestCount(reservation, selectedDate),
+        );
     final unsetMeals = allReservations.where((reservation) {
       return _staysOn(reservation, selectedDate) &&
           (reservation.hasBreakfast == null || reservation.hasDinner == null);
@@ -1130,7 +1142,8 @@ String _formatYen(int value) {
   return '${negative ? '-' : ''}¥$buffer';
 }
 
-int _guestCount(Reservation reservation) {
+int _guestCount(Reservation reservation, [DateTime? date]) {
+  if (date != null) return reservation.totalGuestsOn(date);
   return reservation.totalGuests ??
       (reservation.adults ?? 0) + reservation.children;
 }

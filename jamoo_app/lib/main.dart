@@ -853,6 +853,8 @@ class _TodayOperationsBody extends StatelessWidget {
             description: '朝の対応・清掃準備を確認',
             icon: Icons.logout,
             reservations: data.departures,
+            guestDate: data.date.subtract(const Duration(days: 1)),
+            breakfastGuestDate: data.date.subtract(const Duration(days: 1)),
             settings: settings,
             emptyMessage: '本日のチェックアウトはありません',
             showCheckinCard: false,
@@ -863,6 +865,8 @@ class _TodayOperationsBody extends StatelessWidget {
             description: '今日も宿泊するお客様',
             icon: Icons.hotel_outlined,
             reservations: data.stayovers,
+            guestDate: data.date,
+            breakfastGuestDate: data.date,
             settings: settings,
             emptyMessage: '連泊中のお客様はいません',
             showCheckinCard: false,
@@ -873,6 +877,8 @@ class _TodayOperationsBody extends StatelessWidget {
             description: '到着時間・食事・料金を確認',
             icon: Icons.login,
             reservations: data.arrivals,
+            guestDate: data.date,
+            breakfastGuestDate: data.date,
             settings: settings,
             emptyMessage: '本日のチェックインはありません',
             showCheckinCard: true,
@@ -891,6 +897,8 @@ class _OperationSection extends StatelessWidget {
     required this.description,
     required this.icon,
     required this.reservations,
+    required this.guestDate,
+    required this.breakfastGuestDate,
     required this.settings,
     required this.emptyMessage,
     required this.showCheckinCard,
@@ -902,6 +910,8 @@ class _OperationSection extends StatelessWidget {
   final String description;
   final IconData icon;
   final List<Reservation> reservations;
+  final DateTime guestDate;
+  final DateTime breakfastGuestDate;
   final AppSettings settings;
   final String emptyMessage;
   final bool showCheckinCard;
@@ -940,6 +950,8 @@ class _OperationSection extends StatelessWidget {
             _ReservationCard(
               reservation: reservation,
               settings: settings,
+              guestDate: guestDate,
+              breakfastGuestDate: breakfastGuestDate,
               showCheckinCard: showCheckinCard,
               showReview: showReview,
               onEditArrivalTime: onEditArrivalTime,
@@ -1051,7 +1063,7 @@ class _OperationsSummaryPanel extends StatelessWidget {
                   icon: Icons.bed_outlined,
                 ),
                 _SummaryItem(
-                  label: '朝食',
+                  label: '翌朝食',
                   value: '${data.breakfastGuests}名',
                   icon: Icons.free_breakfast_outlined,
                 ),
@@ -1128,6 +1140,8 @@ class _ReservationCard extends StatelessWidget {
   const _ReservationCard({
     required this.reservation,
     required this.settings,
+    required this.guestDate,
+    required this.breakfastGuestDate,
     this.showCheckinCard = true,
     this.showReview = false,
     this.onEditArrivalTime,
@@ -1135,6 +1149,8 @@ class _ReservationCard extends StatelessWidget {
 
   final Reservation reservation;
   final AppSettings settings;
+  final DateTime guestDate;
+  final DateTime breakfastGuestDate;
   final bool showCheckinCard;
   final bool showReview;
   final Future<void> Function(Reservation)? onEditArrivalTime;
@@ -1192,7 +1208,8 @@ class _ReservationCard extends StatelessWidget {
             const SizedBox(height: 8),
             _InformationRow(
               icon: Icons.people_outline,
-              label: reservation.displayGuestCount,
+              label:
+                  '${reservation.displayGuestCountOn(guestDate)}${reservation.dailyGuestCounts.isEmpty ? '' : '（日別）'}',
             ),
             if (settings.showArrivalTime &&
                 arrivalTime != null &&
@@ -1212,7 +1229,11 @@ class _ReservationCard extends StatelessWidget {
             const SizedBox(height: 8),
             _InformationRow(
               icon: Icons.restaurant_menu,
-              label: _mealLabel(reservation),
+              label: _mealLabel(
+                reservation,
+                guestDate: guestDate,
+                breakfastGuestDate: breakfastGuestDate,
+              ),
             ),
             if (reviewReasons.isNotEmpty) ...[
               const SizedBox(height: 12),
@@ -1289,18 +1310,28 @@ class _ReservationCard extends StatelessWidget {
     return trimmed.substring(0, 1).toUpperCase();
   }
 
-  static String _mealLabel(Reservation reservation) {
+  static String _mealLabel(
+    Reservation reservation, {
+    required DateTime guestDate,
+    required DateTime breakfastGuestDate,
+  }) {
+    final usesDailyGuests = reservation.dailyGuestCounts.isNotEmpty;
+    final breakfastGuestCount = usesDailyGuests
+        ? reservation.totalGuestsOn(breakfastGuestDate)
+        : reservation.breakfastGuestCount;
     final breakfast = reservation.hasBreakfast == null
         ? '未設定'
         : reservation.hasBreakfast == true
-        ? 'あり${reservation.breakfastGuestCount == null ? '' : '（${reservation.breakfastGuestCount}人分）'}'
+        ? 'あり${breakfastGuestCount == null ? '' : '（$breakfastGuestCount人分）'}'
         : 'なし';
     final dinner = reservation.hasDinner == null
         ? '未設定'
         : reservation.hasDinner == true
-        ? 'あり'
+        ? usesDailyGuests
+              ? 'あり（${reservation.totalGuestsOn(guestDate)}人分）'
+              : 'あり'
         : 'なし';
-    return '食事　朝食：$breakfast　夕食：$dinner';
+    return '食事　翌朝食：$breakfast　夕食：$dinner';
   }
 }
 

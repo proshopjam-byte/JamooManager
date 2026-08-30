@@ -87,9 +87,7 @@ void main() {
     final arrivalKey = RoomAssignmentService.reservationKey(newArrival);
 
     expect(
-      result.rows
-          .singleWhere((row) => row.reservationKey == continuingKey)
-          .roomNumber,
+      result.rows.singleWhere((row) => row.reservationKey == continuingKey).roomNumber,
       1,
     );
     final arrivalRow = result.rows.singleWhere(
@@ -99,6 +97,127 @@ void main() {
     expect(arrivalRow.checkedIn, isFalse);
     expect(arrivalRow.amountYen, 12000);
     expect(result.warnings, isEmpty);
+  });
+
+  test('連泊途中で手動変更した人数を保存後も維持する', () {
+    final continuing = _reservation(
+      id: 'manual-guest-count',
+      guestName: '人数変更 客',
+      checkIn: DateTime(2026, 8, 29),
+      checkOut: DateTime(2026, 9, 1),
+      guests: 2,
+      priceYen: 30000,
+    );
+    final service = RoomAssignmentService(
+      rooms: rooms,
+      stayDate: DateTime(2026, 8, 30),
+    );
+    final savedRows = service.create([continuing]).rows.map((row) {
+      if (!row.hasReservation) return row;
+      return row.copyWith(
+        guestCount: 1,
+        guestCountManuallyChanged: true,
+      );
+    }).toList(growable: false);
+
+    final result = service.reconcileWithCarryForward(
+      savedRows,
+      const [],
+      [continuing],
+    );
+    final assigned = result.rows.where((row) => row.hasReservation).toList();
+
+    expect(assigned, hasLength(1));
+    expect(assigned.single.guestCount, 1);
+    expect(assigned.single.guestCountManuallyChanged, isTrue);
+    expect(result.warnings, isEmpty);
+  });
+
+  test('連泊途中で手動変更した人数を翌日に引き継ぐ', () {
+    final continuing = _reservation(
+      id: 'carry-manual-guest-count',
+      guestName: '人数引継 客',
+      checkIn: DateTime(2026, 8, 29),
+      checkOut: DateTime(2026, 9, 1),
+      guests: 2,
+      priceYen: 30000,
+    );
+    final previousService = RoomAssignmentService(
+      rooms: rooms,
+      stayDate: DateTime(2026, 8, 30),
+    );
+    final previousRows = previousService.create([continuing]).rows.map((row) {
+      if (!row.hasReservation) return row;
+      return row.copyWith(
+        guestCount: 1,
+        guestCountManuallyChanged: true,
+      );
+    }).toList(growable: false);
+
+    final result = RoomAssignmentService(
+      rooms: rooms,
+      stayDate: DateTime(2026, 8, 31),
+    ).carryForward(previousRows, [continuing]);
+    final assigned = result.rows.where((row) => row.hasReservation).toList();
+
+    expect(assigned, hasLength(1));
+    expect(assigned.single.guestCount, 1);
+    expect(assigned.single.guestCountManuallyChanged, isTrue);
+    expect(assigned.single.notes, contains('連泊中（3泊目／全3泊）'));
+    expect(result.warnings, isEmpty);
+  });
+
+  test('直接予約の日別人数を同じ部屋へ反映する', () {
+    final continuing = _reservation(
+      id: 'daily-guest-counts',
+      guestName: '日別人数 客',
+      checkIn: DateTime(2026, 9, 1),
+      checkOut: DateTime(2026, 9, 4),
+      guests: 1,
+      priceYen: 46500,
+      dailyGuestCounts: [
+        ReservationDailyGuestCount(
+          date: DateTime(2026, 9, 1),
+          adults: 1,
+          childrenWithBed: 0,
+          childrenWithoutBed: 0,
+        ),
+        ReservationDailyGuestCount(
+          date: DateTime(2026, 9, 2),
+          adults: 2,
+          childrenWithBed: 0,
+          childrenWithoutBed: 0,
+        ),
+        ReservationDailyGuestCount(
+          date: DateTime(2026, 9, 3),
+          adults: 1,
+          childrenWithBed: 0,
+          childrenWithoutBed: 0,
+        ),
+      ],
+    );
+    final firstNight = RoomAssignmentService(
+      rooms: rooms,
+      stayDate: DateTime(2026, 9, 1),
+    ).create([continuing]);
+    final secondNight = RoomAssignmentService(
+      rooms: rooms,
+      stayDate: DateTime(2026, 9, 2),
+    ).carryForward(firstNight.rows, [continuing]);
+    final thirdNight = RoomAssignmentService(
+      rooms: rooms,
+      stayDate: DateTime(2026, 9, 3),
+    ).carryForward(secondNight.rows, [continuing]);
+
+    final first = firstNight.rows.singleWhere((row) => row.hasReservation);
+    final second = secondNight.rows.singleWhere((row) => row.hasReservation);
+    final third = thirdNight.rows.singleWhere((row) => row.hasReservation);
+    expect(first.guestCount, 1);
+    expect(second.guestCount, 2);
+    expect(third.guestCount, 1);
+    expect({first.roomNumber, second.roomNumber, third.roomNumber}, {1});
+    expect(secondNight.warnings, isEmpty);
+    expect(thirdNight.warnings, isEmpty);
   });
 
   test('保存済みの1泊目にも連泊表示を追加し、手入力内容を残す', () {
@@ -114,18 +233,16 @@ void main() {
       rooms: rooms,
       stayDate: DateTime(2026, 8, 29),
     );
-    final savedRows = service
-        .create([continuing])
-        .rows
-        .map((row) {
-          if (!row.hasReservation) return row;
-          return row.copyWith(notes: '低い枕を希望');
-        })
-        .toList(growable: false);
+    final savedRows = service.create([continuing]).rows.map((row) {
+      if (!row.hasReservation) return row;
+      return row.copyWith(notes: '低い枕を希望');
+    }).toList(growable: false);
 
-    final result = service.reconcileWithCarryForward(savedRows, const [], [
-      continuing,
-    ]);
+    final result = service.reconcileWithCarryForward(
+      savedRows,
+      const [],
+      [continuing],
+    );
     final row = result.rows.firstWhere((value) => value.hasReservation);
 
     expect(row.notes, '連泊開始（1泊目／全2泊）・低い枕を希望');
@@ -322,7 +439,10 @@ void main() {
       stayDate: DateTime(2026, 8, 29),
     ).create([reservation]);
 
-    expect(result.rows.where((row) => row.hasReservation).length, 2);
+    expect(
+      result.rows.where((row) => row.hasReservation).length,
+      2,
+    );
     expect(result.warnings, isEmpty);
   });
 
@@ -380,6 +500,7 @@ Reservation _reservation({
   required int guests,
   required int priceYen,
   String roomName = 'ツイン',
+  List<ReservationDailyGuestCount> dailyGuestCounts = const [],
 }) {
   return Reservation(
     id: id,
@@ -399,5 +520,6 @@ Reservation _reservation({
     status: 'confirmed',
     hasBreakfast: false,
     hasDinner: false,
+    dailyGuestCounts: dailyGuestCounts,
   );
 }

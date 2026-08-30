@@ -14,6 +14,7 @@ class ManualReservationFormData {
     required this.adults,
     required this.childrenWithBed,
     required this.childrenWithoutBed,
+    required this.dailyGuestCounts,
     required this.priceYen,
     required this.phone,
     required this.address,
@@ -30,6 +31,7 @@ class ManualReservationFormData {
   final int adults;
   final int childrenWithBed;
   final int childrenWithoutBed;
+  final List<ReservationDailyGuestCount> dailyGuestCounts;
   int get children => childrenWithBed + childrenWithoutBed;
   final int? priceYen;
   final String? phone;
@@ -167,6 +169,7 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
   late DateTime _checkOut;
   late String _selectedRoomType;
   late StayPlan _stayPlan;
+  late List<ReservationDailyGuestCount> _dailyGuestCounts;
 
   @override
   void initState() {
@@ -213,6 +216,9 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
         : reservation?.hasBreakfast == true
         ? StayPlan.breakfast
         : StayPlan.roomOnly;
+    _dailyGuestCounts = List<ReservationDailyGuestCount>.from(
+      reservation?.dailyGuestCounts ?? const [],
+    );
   }
 
   @override
@@ -247,6 +253,13 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
       } else {
         _checkOut = selected;
       }
+      _dailyGuestCounts = _dailyGuestCounts
+          .where(
+            (value) =>
+                !value.date.isBefore(_checkIn) &&
+                value.date.isBefore(_checkOut),
+          )
+          .toList(growable: false);
     });
   }
 
@@ -269,6 +282,14 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
       return;
     }
     if (!_validateRoomOccupancy(guests)) return;
+    final dailyGuestCounts = _normalizedDailyGuestCounts();
+    for (final daily in dailyGuestCounts) {
+      if (daily.totalGuests <= 0) {
+        _showMessage('${_formatDate(daily.date)}の人数は1名以上にしてください。');
+        return;
+      }
+      if (!_validateRoomOccupancy(daily.totalGuests)) return;
+    }
     Navigator.of(context).pop(
       ManualReservationFormData(
         guestName: _guestController.text.trim(),
@@ -278,6 +299,7 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
         adults: adults,
         childrenWithBed: childrenWithBed,
         childrenWithoutBed: childrenWithoutBed,
+        dailyGuestCounts: dailyGuestCounts,
         priceYen: int.tryParse(_priceController.text.replaceAll(',', '')),
         phone: _emptyToNull(_phoneController.text),
         address: _emptyToNull(_addressController.text),
@@ -301,30 +323,217 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
       return;
     }
     if (!_validateRoomOccupancy(guests)) return;
-    final nightlyRate = widget.settings.calculateNightlyRate(
-      roomTypeName: _selectedRoomType,
-      adults: adults,
-      childrenWithBed: childrenWithBed,
-      childrenWithoutBed: childrenWithoutBed,
-      plan: _stayPlan,
-    );
-    if (nightlyRate == null) {
-      _showMessage('この人数内訳・プランの料金が未設定です。');
-      return;
-    }
     final nights = _checkOut.difference(_checkIn).inDays;
     if (nights <= 0) {
       _showMessage('先に宿泊日を確認してください。');
       return;
     }
-    setState(() {
-      _priceController.text = '${nightlyRate * nights}';
-    });
+    var total = 0;
+    final daily = _normalizedDailyGuestCounts();
+    if (daily.isNotEmpty) {
+      for (final guestsForDate in daily) {
+        final nightlyRate = widget.settings.calculateNightlyRate(
+          roomTypeName: _selectedRoomType,
+          adults: guestsForDate.adults,
+          childrenWithBed: guestsForDate.childrenWithBed,
+          childrenWithoutBed: guestsForDate.childrenWithoutBed,
+          plan: _stayPlan,
+        );
+        if (nightlyRate == null) {
+          _showMessage('${_formatDate(guestsForDate.date)}の料金が未設定です。');
+          return;
+        }
+        total += nightlyRate;
+      }
+    } else {
+      final nightlyRate = widget.settings.calculateNightlyRate(
+        roomTypeName: _selectedRoomType,
+        adults: adults,
+        childrenWithBed: childrenWithBed,
+        childrenWithoutBed: childrenWithoutBed,
+        plan: _stayPlan,
+      );
+      if (nightlyRate == null) {
+        _showMessage('この人数内訳・プランの料金が未設定です。');
+        return;
+      }
+      total = nightlyRate * nights;
+    }
+    setState(() => _priceController.text = '$total');
     _showMessage(
-      '${_stayPlan.label}　大人$adults名・子ども（ベッドあり）'
-      '$childrenWithBed名・子ども（ベッドなし）$childrenWithoutBed名、'
-      '$nights泊で計算しました。',
+      daily.isEmpty
+          ? '${_stayPlan.label}、$nights泊で計算しました。'
+          : '${_stayPlan.label}、日別人数で$nights泊分を計算しました。',
     );
+  }
+
+  Future<void> _editDailyGuestCounts() async {
+    final nights = _checkOut.difference(_checkIn).inDays;
+    if (nights <= 1) {
+      _showMessage('日別人数は2泊以上の予約で設定できます。');
+      return;
+    }
+    final baseAdults = int.tryParse(_adultsController.text.trim()) ?? 0;
+    final baseChildrenWithBed =
+        int.tryParse(_childrenWithBedController.text.trim()) ?? 0;
+    final baseChildrenWithoutBed =
+        int.tryParse(_childrenWithoutBedController.text.trim()) ?? 0;
+    final existingByDate = {
+      for (final value in _dailyGuestCounts) _dateKey(value.date): value,
+    };
+    final editors = <_DailyGuestEditors>[];
+    for (var index = 0; index < nights; index++) {
+      final date = _checkIn.add(Duration(days: index));
+      final existing = existingByDate[_dateKey(date)];
+      editors.add(
+        _DailyGuestEditors(
+          date: date,
+          adults: existing?.adults ?? baseAdults,
+          childrenWithBed:
+              existing?.childrenWithBed ?? baseChildrenWithBed,
+          childrenWithoutBed:
+              existing?.childrenWithoutBed ?? baseChildrenWithoutBed,
+        ),
+      );
+    }
+
+    final formKey = GlobalKey<FormState>();
+    String? errorMessage;
+    final result = await showDialog<List<ReservationDailyGuestCount>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('宿泊日ごとの人数'),
+          content: SizedBox(
+            width: 680,
+            child: Form(
+              key: formKey,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('人数が変わる日だけ数値を変更してください。'),
+                    const SizedBox(height: 12),
+                    if (errorMessage != null) ...[
+                      Text(
+                        errorMessage!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    for (final editor in editors) ...[
+                      Row(
+                        children: [
+                          SizedBox(
+                            width: 105,
+                            child: Text(
+                              _formatDate(editor.date),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _dailyNumberField(
+                              editor.adultsController,
+                              '大人',
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _dailyNumberField(
+                              editor.childrenWithBedController,
+                              '子ども・ベッドあり',
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _dailyNumberField(
+                              editor.childrenWithoutBedController,
+                              '子ども・ベッドなし',
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('キャンセル'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(
+                const <ReservationDailyGuestCount>[],
+              ),
+              child: const Text('共通人数に戻す'),
+            ),
+            FilledButton.icon(
+              onPressed: () {
+                if (formKey.currentState?.validate() != true) return;
+                final values = editors
+                    .map((editor) => editor.toValue())
+                    .toList(growable: false);
+                for (final value in values) {
+                  if (value.totalGuests <= 0) {
+                    setDialogState(() {
+                      errorMessage =
+                          '${_formatDate(value.date)}の人数は1名以上にしてください。';
+                    });
+                    return;
+                  }
+                  final minimum = widget.settings.minimumGuestsFor(
+                    _selectedRoomType,
+                  );
+                  final maximum = widget.settings.maximumGuestsFor(
+                    _selectedRoomType,
+                  );
+                  if (value.totalGuests < minimum ||
+                      (maximum > 0 && value.totalGuests > maximum)) {
+                    setDialogState(() {
+                      errorMessage =
+                          '${_formatDate(value.date)}は$_selectedRoomTypeの'
+                          '利用人数（$minimum～$maximum名）に収まりません。';
+                    });
+                    return;
+                  }
+                }
+                Navigator.of(dialogContext).pop(values);
+              },
+              icon: const Icon(Icons.save_outlined),
+              label: const Text('日別人数を反映'),
+            ),
+          ],
+        ),
+      ),
+    );
+    for (final editor in editors) {
+      editor.dispose();
+    }
+    if (result == null || !mounted) return;
+    setState(() => _dailyGuestCounts = result);
+  }
+
+  List<ReservationDailyGuestCount> _normalizedDailyGuestCounts() {
+    if (_dailyGuestCounts.isEmpty) return const [];
+    final result = _dailyGuestCounts
+        .where(
+          (value) =>
+              !value.date.isBefore(_checkIn) && value.date.isBefore(_checkOut),
+        )
+        .toList(growable: false)
+      ..sort((first, second) => first.date.compareTo(second.date));
+    return result;
   }
 
   bool _validateRoomOccupancy(int guests) {
@@ -398,6 +607,21 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _checkOut.difference(_checkIn).inDays > 1
+                        ? _editDailyGuestCounts
+                        : null,
+                    icon: const Icon(Icons.people_alt_outlined),
+                    label: Text(
+                      _dailyGuestCounts.isEmpty
+                          ? '連泊の日別人数を設定'
+                          : '日別人数を編集（設定済み）',
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
@@ -519,6 +743,25 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
     );
   }
 
+  Widget _dailyNumberField(
+    TextEditingController controller,
+    String label,
+  ) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: TextInputType.number,
+      decoration: InputDecoration(
+        labelText: label,
+        border: const OutlineInputBorder(),
+        isDense: true,
+      ),
+      validator: (value) {
+        final number = int.tryParse(value ?? '');
+        return number == null || number < 0 ? '0以上' : null;
+      },
+    );
+  }
+
   List<String> _roomTypeChoices() {
     final result = widget.settings.availableRoomTypeNames.toList();
     if (!result.contains(_selectedRoomType)) {
@@ -545,4 +788,46 @@ class _ManualReservationDialogState extends State<_ManualReservationDialog> {
     return '${date.year}/${date.month.toString().padLeft(2, '0')}/'
         '${date.day.toString().padLeft(2, '0')}';
   }
+}
+
+class _DailyGuestEditors {
+  _DailyGuestEditors({
+    required this.date,
+    required int adults,
+    required int childrenWithBed,
+    required int childrenWithoutBed,
+  }) : adultsController = TextEditingController(text: '$adults'),
+       childrenWithBedController = TextEditingController(
+         text: '$childrenWithBed',
+       ),
+       childrenWithoutBedController = TextEditingController(
+         text: '$childrenWithoutBed',
+       );
+
+  final DateTime date;
+  final TextEditingController adultsController;
+  final TextEditingController childrenWithBedController;
+  final TextEditingController childrenWithoutBedController;
+
+  ReservationDailyGuestCount toValue() {
+    return ReservationDailyGuestCount(
+      date: date,
+      adults: int.parse(adultsController.text),
+      childrenWithBed: int.parse(childrenWithBedController.text),
+      childrenWithoutBed: int.parse(childrenWithoutBedController.text),
+    );
+  }
+
+  void dispose() {
+    adultsController.dispose();
+    childrenWithBedController.dispose();
+    childrenWithoutBedController.dispose();
+  }
+}
+
+String _dateKey(DateTime date) {
+  final year = date.year.toString().padLeft(4, '0');
+  final month = date.month.toString().padLeft(2, '0');
+  final day = date.day.toString().padLeft(2, '0');
+  return '$year-$month-$day';
 }

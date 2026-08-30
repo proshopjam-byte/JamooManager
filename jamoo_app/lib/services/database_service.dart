@@ -10,7 +10,7 @@ class DatabaseService {
   static final DatabaseService instance = DatabaseService._();
 
   static const String databaseFileName = 'jamoo_manager.db';
-  static const int databaseVersion = 6;
+  static const int databaseVersion = 7;
 
   Database? _database;
 
@@ -226,6 +226,9 @@ class DatabaseService {
     if (oldVersion < 6) {
       await _createInventoryTables(db);
     }
+    if (oldVersion < 7) {
+      await _addGuestCountManualColumn(db);
+    }
   }
 
   static Future<void> _addCustomerCountryColumn(DatabaseExecutor db) async {
@@ -284,6 +287,7 @@ class DatabaseService {
         reservation_number TEXT,
         guest_name TEXT NOT NULL DEFAULT '',
         guest_count INTEGER NOT NULL DEFAULT 0,
+        guest_count_manual INTEGER NOT NULL DEFAULT 0,
         checked_in INTEGER NOT NULL DEFAULT 0,
         amount_yen INTEGER,
         payment TEXT NOT NULL DEFAULT '',
@@ -301,6 +305,23 @@ class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_checkin_sheet_rows_date
       ON checkin_sheet_rows(sheet_date)
     ''');
+  }
+
+  static Future<void> _addGuestCountManualColumn(
+    DatabaseExecutor db,
+  ) async {
+    final columns = await db.rawQuery(
+      'PRAGMA table_info(checkin_sheet_rows)',
+    );
+    final hasColumn = columns.any(
+      (row) => row['name'] == 'guest_count_manual',
+    );
+    if (!hasColumn) {
+      await db.execute(
+        'ALTER TABLE checkin_sheet_rows '
+        'ADD COLUMN guest_count_manual INTEGER NOT NULL DEFAULT 0',
+      );
+    }
   }
 
   static Future<void> _createInventoryTables(DatabaseExecutor db) async {

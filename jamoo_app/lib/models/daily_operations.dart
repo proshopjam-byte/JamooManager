@@ -21,27 +21,30 @@ class DailyOperationsData {
     ),
   );
 
-  int get arrivalGuests => _guestTotal(arrivals);
-  int get stayoverGuests => _guestTotal(stayovers);
-  int get departureGuests => _guestTotal(departures);
-  int get occupiedGuests => _guestTotal(occupiedTonight);
+  int get arrivalGuests => _guestTotal(arrivals, date);
+  int get stayoverGuests => _guestTotal(stayovers, date);
+  int get departureGuests =>
+      _guestTotal(departures, date.subtract(const Duration(days: 1)));
+  int get occupiedGuests => _guestTotal(occupiedTonight, date);
   int get occupiedRooms => occupiedTonight.fold<int>(
     0,
     (total, reservation) => total + reservation.roomCount,
   );
 
   int get breakfastGuests {
-    final morningGuests = [...departures, ...stayovers];
-    return morningGuests.fold<int>(0, (total, reservation) {
+    return occupiedTonight.fold<int>(0, (total, reservation) {
       if (reservation.hasBreakfast != true) return total;
       return total +
-          (reservation.breakfastGuestCount ?? _guestCount(reservation));
+          (reservation.dailyGuestCounts.isEmpty &&
+                  reservation.breakfastGuestCount != null
+              ? reservation.breakfastGuestCount!
+              : _guestCount(reservation, date));
     });
   }
 
   int get dinnerGuests => occupiedTonight.fold<int>(0, (total, reservation) {
     if (reservation.hasDinner != true) return total;
-    return total + _guestCount(reservation);
+    return total + _guestCount(reservation, date);
   });
 
   int get reviewCount => arrivals
@@ -75,16 +78,15 @@ class DailyOperationsData {
     return List.unmodifiable(reasons);
   }
 
-  static int _guestTotal(Iterable<Reservation> reservations) {
+  static int _guestTotal(Iterable<Reservation> reservations, DateTime date) {
     return reservations.fold<int>(
       0,
-      (total, reservation) => total + _guestCount(reservation),
+      (total, reservation) => total + _guestCount(reservation, date),
     );
   }
 
-  static int _guestCount(Reservation reservation) {
-    return reservation.totalGuests ??
-        (reservation.adults ?? 0) + reservation.children;
+  static int _guestCount(Reservation reservation, DateTime date) {
+    return reservation.totalGuestsOn(date);
   }
 
   static bool _isSameDate(DateTime? first, DateTime second) {

@@ -77,6 +77,7 @@ class DatabaseReservationRepository {
     required int adults,
     required int childrenWithBed,
     required int childrenWithoutBed,
+    required List<ReservationDailyGuestCount> dailyGuestCounts,
     required int? priceYen,
     required String? phone,
     required String? address,
@@ -116,6 +117,9 @@ class DatabaseReservationRepository {
         'hasDinner': hasDinner,
         'childrenWithBed': childrenWithBed,
         'childrenWithoutBed': childrenWithoutBed,
+        'dailyGuestCounts': dailyGuestCounts
+            .map((value) => value.toJson())
+            .toList(growable: false),
       }),
       'created_at': now,
       'updated_at': now,
@@ -304,7 +308,9 @@ class DatabaseReservationRepository {
     );
 
     if (metadata.isNotEmpty) {
-      return DateTime.tryParse(metadata.first['value']?.toString() ?? '');
+      return DateTime.tryParse(
+        metadata.first['value']?.toString() ?? '',
+      );
     }
     return null;
   }
@@ -376,7 +382,31 @@ class DatabaseReservationRepository {
           portalData?['hasDinner'] as bool? ??
           inferredMeals.dinner,
       planName: planName,
+      dailyGuestCounts: _readDailyGuestCounts(
+        manualData?['dailyGuestCounts'],
+      ),
     );
+  }
+
+  static List<ReservationDailyGuestCount> _readDailyGuestCounts(
+    Object? value,
+  ) {
+    if (value is! List) return const [];
+    final result = <ReservationDailyGuestCount>[];
+    for (final item in value) {
+      if (item is! Map) continue;
+      try {
+        result.add(
+          ReservationDailyGuestCount.fromJson(
+            Map<String, dynamic>.from(item),
+          ),
+        );
+      } on FormatException {
+        // Keep loading the reservation if one legacy entry is malformed.
+      }
+    }
+    result.sort((first, second) => first.date.compareTo(second.date));
+    return List.unmodifiable(result);
   }
 
   static String? _readText(Object? value) {
