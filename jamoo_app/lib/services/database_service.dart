@@ -10,7 +10,7 @@ class DatabaseService {
   static final DatabaseService instance = DatabaseService._();
 
   static const String databaseFileName = 'jamoo_manager.db';
-  static const int databaseVersion = 5;
+  static const int databaseVersion = 6;
 
   Database? _database;
 
@@ -206,6 +206,7 @@ class DatabaseService {
       await _createMealOverridesTable(txn);
       await _createCustomerDocumentsTable(txn);
       await _createCheckinSheetRowsTable(txn);
+      await _createInventoryTables(txn);
     });
   }
 
@@ -221,6 +222,9 @@ class DatabaseService {
     }
     if (oldVersion < 5) {
       await _createCheckinSheetRowsTable(db);
+    }
+    if (oldVersion < 6) {
+      await _createInventoryTables(db);
     }
   }
 
@@ -296,6 +300,83 @@ class DatabaseService {
     await db.execute('''
       CREATE INDEX IF NOT EXISTS idx_checkin_sheet_rows_date
       ON checkin_sheet_rows(sheet_date)
+    ''');
+  }
+
+  static Future<void> _createInventoryTables(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS inventory_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sync_key TEXT NOT NULL UNIQUE,
+        sku TEXT UNIQUE,
+        barcode TEXT UNIQUE,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT '',
+        unit TEXT NOT NULL DEFAULT '個',
+        current_stock REAL NOT NULL DEFAULT 0,
+        reorder_level REAL NOT NULL DEFAULT 0,
+        cost_price_yen INTEGER,
+        sale_price_yen INTEGER,
+        supplier TEXT,
+        sale_enabled INTEGER NOT NULL DEFAULT 1,
+        active INTEGER NOT NULL DEFAULT 1,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_inventory_items_name
+      ON inventory_items(name)
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_inventory_items_barcode
+      ON inventory_items(barcode)
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_inventory_items_active
+      ON inventory_items(active)
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS inventory_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        transaction_uuid TEXT NOT NULL UNIQUE,
+        item_id INTEGER NOT NULL,
+        transaction_type TEXT NOT NULL,
+        quantity_change REAL NOT NULL,
+        stock_after REAL NOT NULL,
+        unit_price_yen INTEGER,
+        total_yen INTEGER,
+        note TEXT,
+        reservation_source TEXT,
+        reservation_number TEXT,
+        device_id TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'local',
+        occurred_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(item_id)
+          REFERENCES inventory_items(id)
+          ON DELETE RESTRICT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_inventory_transactions_item
+      ON inventory_transactions(item_id)
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_inventory_transactions_occurred
+      ON inventory_transactions(occurred_at)
+    ''');
+
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_inventory_transactions_sync
+      ON inventory_transactions(sync_status)
     ''');
   }
 

@@ -5,6 +5,7 @@ import 'models/daily_operations.dart';
 import 'models/reservation.dart';
 import 'pages/customer_list_page.dart';
 import 'pages/checkin_sheet_page.dart';
+import 'pages/inventory_management_page.dart';
 import 'pages/reservation_calendar_page.dart';
 import 'pages/settings_page.dart';
 import 'repositories/database_reservation_repository.dart';
@@ -453,6 +454,12 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
     }
   }
 
+  Future<void> _openInventoryManagement() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(builder: (context) => const InventoryManagementPage()),
+    );
+  }
+
   Future<void> _editArrivalTime(Reservation reservation) async {
     final reservationNumber = reservation.reservationNumber?.trim();
     if (reservationNumber == null || reservationNumber.isEmpty) {
@@ -597,6 +604,12 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
             onPressed: _isLoadingSettings ? null : _openCustomerList,
             icon: const Icon(Icons.people_alt_outlined),
           ),
+          if (_settings.inventoryEnabled)
+            IconButton(
+              tooltip: '在庫・販売管理',
+              onPressed: _isLoadingSettings ? null : _openInventoryManagement,
+              icon: const Icon(Icons.inventory_2_outlined),
+            ),
           Padding(
             padding: const EdgeInsets.only(right: 8),
             child: OutlinedButton.icon(

@@ -25,6 +25,7 @@ class _SettingsPageState extends State<SettingsPage> {
   late bool _showPrice;
   late bool _showReservationNumber;
   late bool _showArrivalTime;
+  late bool _inventoryEnabled;
 
   bool _isSaving = false;
   bool _isCheckingEnvironment = false;
@@ -50,6 +51,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _showPrice = settings.showPrice;
     _showReservationNumber = settings.showReservationNumber;
     _showArrivalTime = settings.showArrivalTime;
+    _inventoryEnabled = settings.inventoryEnabled;
   }
 
   @override
@@ -94,6 +96,7 @@ class _SettingsPageState extends State<SettingsPage> {
       showPrice: _showPrice,
       showReservationNumber: _showReservationNumber,
       showArrivalTime: _showArrivalTime,
+      inventoryEnabled: _inventoryEnabled,
       managerRootPath: managerRootPath.isEmpty ? null : managerRootPath,
     );
 
@@ -170,6 +173,7 @@ class _SettingsPageState extends State<SettingsPage> {
       _showPrice = defaults.showPrice;
       _showReservationNumber = defaults.showReservationNumber;
       _showArrivalTime = defaults.showArrivalTime;
+      _inventoryEnabled = defaults.inventoryEnabled;
     });
   }
 
@@ -414,6 +418,31 @@ class _SettingsPageState extends State<SettingsPage> {
                           _showArrivalTime = value;
                         });
                       },
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _SectionCard(
+            title: '追加機能',
+            icon: Icons.extension_outlined,
+            children: [
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('在庫・販売管理を使用'),
+                subtitle: const Text('商品台帳、入荷、販売、館内使用、廃棄、棚卸調整を利用します。'),
+                value: _inventoryEnabled,
+                onChanged: controlsDisabled
+                    ? null
+                    : (value) {
+                        setState(() {
+                          _inventoryEnabled = value;
+                        });
+                      },
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '使用しない施設では、運営ダッシュボードの在庫ボタンを非表示にできます。',
+                style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
           ),

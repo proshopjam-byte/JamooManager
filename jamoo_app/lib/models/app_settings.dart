@@ -7,6 +7,7 @@ class AppSettings {
     required this.showPrice,
     required this.showReservationNumber,
     required this.showArrivalTime,
+    required this.inventoryEnabled,
     this.managerRootPath,
   });
 
@@ -17,6 +18,7 @@ class AppSettings {
   final bool showPrice;
   final bool showReservationNumber;
   final bool showArrivalTime;
+  final bool inventoryEnabled;
 
   /// JamooManagerのルートフォルダ。
   ///
@@ -32,6 +34,7 @@ class AppSettings {
     showPrice: true,
     showReservationNumber: true,
     showArrivalTime: true,
+    inventoryEnabled: true,
     managerRootPath: null,
   );
 
@@ -53,6 +56,10 @@ class AppSettings {
         json['showArrivalTime'],
         defaults.showArrivalTime,
       ),
+      inventoryEnabled: _readBool(
+        json['inventoryEnabled'],
+        defaults.inventoryEnabled,
+      ),
       managerRootPath: _readNullableString(json['managerRootPath']),
     );
   }
@@ -66,6 +73,7 @@ class AppSettings {
       'showPrice': showPrice,
       'showReservationNumber': showReservationNumber,
       'showArrivalTime': showArrivalTime,
+      'inventoryEnabled': inventoryEnabled,
       'managerRootPath': managerRootPath,
     };
   }
@@ -78,6 +86,7 @@ class AppSettings {
     bool? showPrice,
     bool? showReservationNumber,
     bool? showArrivalTime,
+    bool? inventoryEnabled,
     String? managerRootPath,
     bool clearManagerRootPath = false,
   }) {
@@ -90,6 +99,7 @@ class AppSettings {
       showReservationNumber:
           showReservationNumber ?? this.showReservationNumber,
       showArrivalTime: showArrivalTime ?? this.showArrivalTime,
+      inventoryEnabled: inventoryEnabled ?? this.inventoryEnabled,
       managerRootPath: clearManagerRootPath
           ? null
           : managerRootPath ?? this.managerRootPath,
