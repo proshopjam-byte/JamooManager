@@ -456,7 +456,10 @@ class _TodayCheckInPageState extends State<TodayCheckInPage> {
 
   Future<void> _openInventoryManagement() async {
     await Navigator.of(context).push<void>(
-      MaterialPageRoute(builder: (context) => const InventoryManagementPage()),
+      MaterialPageRoute(
+        builder: (context) =>
+            InventoryManagementPage(facilityName: _settings.facilityName),
+      ),
     );
   }
 

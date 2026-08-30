@@ -1,11 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/inventory.dart';
 import '../repositories/inventory_repository.dart';
 import '../services/inventory_csv_service.dart';
+import '../services/inventory_lan_server_service.dart';
 
 class InventoryManagementPage extends StatefulWidget {
-  const InventoryManagementPage({super.key});
+  const InventoryManagementPage({super.key, required this.facilityName});
+
+  final String facilityName;
 
   @override
   State<InventoryManagementPage> createState() =>
@@ -20,6 +26,7 @@ class _InventoryManagementPageState extends State<InventoryManagementPage> {
   final TextEditingController _searchController = TextEditingController();
 
   Future<InventoryDashboardData>? _future;
+  StreamSubscription<void>? _inventoryChangeSubscription;
   bool _lowStockOnly = false;
   bool _busy = false;
 
@@ -27,10 +34,15 @@ class _InventoryManagementPageState extends State<InventoryManagementPage> {
   void initState() {
     super.initState();
     _reload();
+    _inventoryChangeSubscription = InventoryLanServerService.instance.changes
+        .listen((_) {
+          if (mounted) _reload();
+        });
   }
 
   @override
   void dispose() {
+    _inventoryChangeSubscription?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -161,6 +173,38 @@ class _InventoryManagementPageState extends State<InventoryManagementPage> {
     }
   }
 
+  Future<void> _showDeviceConnection() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final status = await InventoryLanServerService.instance.start(
+        facilityName: widget.facilityName,
+      );
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => _InventoryDeviceConnectionDialog(
+          status: status,
+          onStop: () async {
+            await InventoryLanServerService.instance.stop();
+            if (dialogContext.mounted) {
+              Navigator.of(dialogContext).pop();
+            }
+            if (mounted) {
+              _showSnackBar('端末接続を停止しました。');
+            }
+          },
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      await _showError('端末接続を開始できませんでした', error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   void _showSnackBar(String message) {
     ScaffoldMessenger.of(
       context,
@@ -189,6 +233,14 @@ class _InventoryManagementPageState extends State<InventoryManagementPage> {
       appBar: AppBar(
         title: const Text('在庫・販売管理'),
         actions: [
+          OutlinedButton.icon(
+            onPressed: _busy ? null : _showDeviceConnection,
+            icon: const Icon(Icons.devices_outlined),
+            label: Text(
+              InventoryLanServerService.instance.isRunning ? '端末接続中' : '端末接続',
+            ),
+          ),
+          const SizedBox(width: 8),
           OutlinedButton.icon(
             onPressed: _busy ? null : _importCsv,
             icon: const Icon(Icons.file_upload_outlined),
@@ -593,6 +645,112 @@ class _InventoryManagementPageState extends State<InventoryManagementPage> {
 
   static int? _nullableInt(String value) =>
       int.tryParse(value.replaceAll(',', '').replaceAll('¥', '').trim());
+}
+
+class _InventoryDeviceConnectionDialog extends StatelessWidget {
+  const _InventoryDeviceConnectionDialog({
+    required this.status,
+    required this.onStop,
+  });
+
+  final InventoryLanServerStatus status;
+  final Future<void> Function() onStop;
+
+  @override
+  Widget build(BuildContext context) {
+    final urls = status.serverUrls;
+    final accessToken = status.accessToken ?? '';
+    return AlertDialog(
+      title: const Text('スマホ・Chromebookを接続'),
+      content: SizedBox(
+        width: 620,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Windows PCと端末を同じWi-Fiに接続し、'
+                '端末のChromeまたはSafariで次のアドレスを開いてください。',
+              ),
+              const SizedBox(height: 16),
+              Text('接続アドレス', style: Theme.of(context).textTheme.labelLarge),
+              const SizedBox(height: 6),
+              if (urls.isEmpty)
+                const Text('接続先を取得できません。Wi-Fi接続を確認してください。')
+              else
+                for (final url in urls)
+                  Card(
+                    child: ListTile(
+                      title: SelectableText(url),
+                      trailing: IconButton(
+                        tooltip: 'コピー',
+                        onPressed: () async {
+                          await Clipboard.setData(ClipboardData(text: url));
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('接続アドレスをコピーしました。')),
+                            );
+                          }
+                        },
+                        icon: const Icon(Icons.copy_outlined),
+                      ),
+                    ),
+                  ),
+              const SizedBox(height: 14),
+              Text('接続コード', style: Theme.of(context).textTheme.labelLarge),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  SelectableText(
+                    accessToken,
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 5,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  IconButton(
+                    tooltip: 'コードをコピー',
+                    onPressed: accessToken.isEmpty
+                        ? null
+                        : () => Clipboard.setData(
+                            ClipboardData(text: accessToken),
+                          ),
+                    icon: const Icon(Icons.copy_outlined),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                '・Windowsの確認が出たら「プライベートネットワーク」のアクセスを許可\n'
+                '・接続中はJamooManagerとWindows PCを起動したままにする\n'
+                '・同じ館内Wi-Fi上でのみ利用でき、モバイル通信は不要',
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                '「閉じる」で画面を閉じても接続は継続します。'
+                '「接続を停止」した後は、再度「端末接続」を押し、'
+                '端末のブラウザを更新してください。',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton.icon(
+          onPressed: onStop,
+          icon: const Icon(Icons.link_off),
+          label: const Text('接続を停止'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('閉じる'),
+        ),
+      ],
+    );
+  }
 }
 
 class _InventoryBody extends StatelessWidget {

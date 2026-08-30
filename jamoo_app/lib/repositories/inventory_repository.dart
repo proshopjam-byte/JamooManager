@@ -46,7 +46,11 @@ class InventoryRepository {
     ''');
 
     final localNow = DateTime.now();
-    final start = DateTime(localNow.year, localNow.month, localNow.day).toUtc();
+    final start = DateTime(
+      localNow.year,
+      localNow.month,
+      localNow.day,
+    ).toUtc();
     final end = start.add(const Duration(days: 1));
     final salesRows = await db.rawQuery(
       '''
@@ -82,6 +86,20 @@ class InventoryRepository {
       orderBy: 'category COLLATE NOCASE, name COLLATE NOCASE',
     );
     return rows.map(_itemFromRow).toList(growable: false);
+  }
+
+  Future<InventoryItem?> findItemByIdentifier(String identifier) async {
+    final normalized = identifier.trim();
+    if (normalized.isEmpty) return null;
+    final db = await _database();
+    final rows = await db.query(
+      'inventory_items',
+      where:
+          'active = 1 AND (sync_key = ? OR sku = ? OR barcode = ?)',
+      whereArgs: [normalized, normalized, normalized],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : _itemFromRow(rows.single);
   }
 
   Future<InventoryItem> saveItem(InventoryItem item) async {
@@ -150,7 +168,9 @@ class InventoryRepository {
       return item.copyWith(updatedAt: now);
     } on DatabaseException catch (error) {
       if (error.isUniqueConstraintError()) {
-        throw const InventoryRepositoryException('同じ商品コードまたはバーコードが既に登録されています。');
+        throw const InventoryRepositoryException(
+          '同じ商品コードまたはバーコードが既に登録されています。',
+        );
       }
       throw InventoryRepositoryException('商品を保存できませんでした。\n$error');
     }
@@ -160,7 +180,10 @@ class InventoryRepository {
     final db = await _database();
     await db.update(
       'inventory_items',
-      {'active': 0, 'updated_at': DateTime.now().toUtc().toIso8601String()},
+      {
+        'active': 0,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      },
       where: 'id = ?',
       whereArgs: [itemId],
     );
@@ -175,6 +198,7 @@ class InventoryRepository {
     String? reservationSource,
     String? reservationNumber,
     String deviceId = 'windows',
+    String? transactionUuid,
     DateTime? occurredAt,
   }) async {
     final itemId = item.id;
@@ -185,6 +209,23 @@ class InventoryRepository {
     final movementAt = (occurredAt ?? DateTime.now()).toUtc();
 
     return db.transaction((txn) async {
+      final normalizedUuid = transactionUuid?.trim();
+      if (normalizedUuid != null && normalizedUuid.isNotEmpty) {
+        final duplicateRows = await txn.rawQuery(
+          '''
+          SELECT t.*, i.name AS item_name
+          FROM inventory_transactions t
+          JOIN inventory_items i ON i.id = t.item_id
+          WHERE t.transaction_uuid = ?
+          LIMIT 1
+          ''',
+          [normalizedUuid],
+        );
+        if (duplicateRows.isNotEmpty) {
+          return _transactionFromRow(duplicateRows.single);
+        }
+      }
+
       final rows = await txn.query(
         'inventory_items',
         columns: ['current_stock', 'name'],
@@ -202,8 +243,7 @@ class InventoryRepository {
         type: type,
         quantity: quantity,
       );
-      final effectiveUnitPrice =
-          unitPriceYen ??
+      final effectiveUnitPrice = unitPriceYen ??
           (type == InventoryTransactionType.sale
               ? item.salePriceYen
               : type == InventoryTransactionType.purchase
@@ -222,10 +262,13 @@ class InventoryRepository {
         where: 'id = ?',
         whereArgs: [itemId],
       );
-      final transactionUuid = _transactionUuid(movementAt);
+      final effectiveTransactionUuid =
+          normalizedUuid == null || normalizedUuid.isEmpty
+          ? _transactionUuid(movementAt)
+          : normalizedUuid;
       final transactionId = await _insertTransaction(
         txn,
-        transactionUuid: transactionUuid,
+        transactionUuid: effectiveTransactionUuid,
         itemId: itemId,
         type: type,
         quantityChange: result.quantityChange,
@@ -241,7 +284,7 @@ class InventoryRepository {
 
       return InventoryTransaction(
         id: transactionId,
-        transactionUuid: transactionUuid,
+        transactionUuid: effectiveTransactionUuid,
         itemId: itemId,
         itemName: rows.single['name']?.toString() ?? item.name,
         type: type,
@@ -324,7 +367,9 @@ class InventoryRepository {
     );
   }
 
-  static InventoryTransaction _transactionFromRow(Map<String, Object?> row) {
+  static InventoryTransaction _transactionFromRow(
+    Map<String, Object?> row,
+  ) {
     return InventoryTransaction(
       id: _readInt(row['id']),
       transactionUuid: row['transaction_uuid']?.toString() ?? '',

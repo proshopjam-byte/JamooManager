@@ -5,6 +5,7 @@ import 'package:jamoo_app/models/app_settings.dart';
 import 'package:jamoo_app/models/inventory.dart';
 import 'package:jamoo_app/repositories/inventory_repository.dart';
 import 'package:jamoo_app/services/inventory_csv_service.dart';
+import 'package:jamoo_app/services/inventory_mobile_page.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -139,6 +140,63 @@ void main() {
 
     expect(result.quantityChange, -3);
     expect(result.stockAfter, 5);
+  });
+
+  test('端末から同じ処理IDが再送されても在庫を二重に減らさない', () async {
+    final item = await repository.saveItem(
+      InventoryItem(
+        syncKey: InventoryRepository.createSyncKey(),
+        barcode: '490000000099',
+        name: '端末販売テスト',
+        category: '食品',
+        unit: '個',
+        currentStock: 3,
+        reorderLevel: 1,
+        salePriceYen: 500,
+        saleEnabled: true,
+        active: true,
+      ),
+    );
+
+    await repository.recordMovement(
+      item: item,
+      type: InventoryTransactionType.sale,
+      quantity: 1,
+      deviceId: 'chromebook',
+      transactionUuid: 'mobile-transaction-001',
+    );
+    await repository.recordMovement(
+      item: item,
+      type: InventoryTransactionType.sale,
+      quantity: 1,
+      deviceId: 'chromebook',
+      transactionUuid: 'mobile-transaction-001',
+    );
+
+    final dashboard = await repository.loadDashboard();
+    expect(dashboard.items.single.currentStock, 2);
+    expect(
+      (await repository.findItemByIdentifier('490000000099'))?.name,
+      '端末販売テスト',
+    );
+    expect(
+      dashboard.recentTransactions
+          .where(
+            (transaction) =>
+                transaction.transactionUuid == 'mobile-transaction-001',
+          )
+          .length,
+      1,
+    );
+  });
+
+  test('スマホ・Chromebook用画面に必要な操作が含まれる', () {
+    expect(inventoryMobilePageHtml, contains('在庫・販売'));
+    expect(inventoryMobilePageHtml, contains('接続コード'));
+    expect(inventoryMobilePageHtml, contains('館内使用'));
+    expect(inventoryMobilePageHtml, contains('棚卸調整'));
+    expect(inventoryMobilePageHtml, contains('setInterval'));
+    expect(inventoryMobilePageHtml, contains('コード再入力'));
   });
 
   test('旧設定ファイルでも在庫管理は初期値で有効になる', () {
