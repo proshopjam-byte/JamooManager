@@ -142,6 +142,58 @@ void main() {
     expect(result.stockAfter, 5);
   });
 
+  test('入出庫履歴のみをクリアし商品と現在庫を残す', () async {
+    final item = await repository.saveItem(
+      InventoryItem(
+        syncKey: InventoryRepository.createSyncKey(),
+        name: '履歴クリアテスト',
+        category: '食品',
+        unit: '個',
+        currentStock: 2,
+        reorderLevel: 1,
+        saleEnabled: true,
+        active: true,
+      ),
+    );
+    await repository.recordMovement(
+      item: item,
+      type: InventoryTransactionType.purchase,
+      quantity: 3,
+    );
+
+    final deleted = await repository.clearTransactionHistory();
+    final dashboard = await repository.loadDashboard();
+
+    expect(deleted, 2);
+    expect(dashboard.recentTransactions, isEmpty);
+    expect(dashboard.todaySalesYen, 0);
+    expect(dashboard.items, hasLength(1));
+    expect(dashboard.items.single.currentStock, 5);
+  });
+
+  test('商品の並び順を変更して保存する', () async {
+    for (final name in ['A商品', 'B商品', 'C商品']) {
+      await repository.saveItem(
+        InventoryItem(
+          syncKey: InventoryRepository.createSyncKey(),
+          name: name,
+          category: '食品',
+          unit: '個',
+          currentStock: 1,
+          reorderLevel: 0,
+          saleEnabled: true,
+          active: true,
+        ),
+      );
+    }
+    final before = await repository.loadItems();
+    await repository.moveItem(itemId: before[2].id!, offset: -1);
+
+    final reordered = await InventoryRepository(database: database).loadItems();
+    expect(reordered.map((item) => item.name), ['A商品', 'C商品', 'B商品']);
+    expect(reordered.map((item) => item.currentStock), [1, 1, 1]);
+  });
+
   test('端末から同じ処理IDが再送されても在庫を二重に減らさない', () async {
     final item = await repository.saveItem(
       InventoryItem(
@@ -202,6 +254,12 @@ void main() {
     expect(inventoryMobilePageHtml, contains('BarcodeDetector'));
     expect(inventoryMobilePageHtml, contains('decodeEan13'));
     expect(inventoryMobilePageHtml, contains('USBバーコードリーダー'));
+    expect(inventoryMobilePageHtml, contains('新しい商品として登録'));
+    expect(inventoryMobilePageHtml, contains('バーコードから商品登録'));
+    expect(inventoryMobilePageHtml, contains("api('/api/v1/inventory/items'"));
+    expect(inventoryMobilePageHtml, contains('normalizeNumber'));
+    expect(inventoryMobilePageHtml, contains('String.fromCharCode'));
+    expect(inventoryMobilePageHtml, contains('初期在庫は0以上'));
   });
 
   test('既存商品にバーコードを登録して番号で検索できる', () async {

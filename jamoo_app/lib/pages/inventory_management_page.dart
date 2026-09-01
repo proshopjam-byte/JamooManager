@@ -135,6 +135,60 @@ class _InventoryManagementPageState extends State<InventoryManagementPage> {
     }
   }
 
+  Future<void> _moveItem(InventoryItem item, int offset) async {
+    final itemId = item.id;
+    if (itemId == null || _busy) return;
+    setState(() => _busy = true);
+    try {
+      await _repository.moveItem(itemId: itemId, offset: offset);
+      if (!mounted) return;
+      _reload();
+    } catch (error) {
+      if (!mounted) return;
+      await _showError('商品を並び替えできませんでした', error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _clearTransactionHistory() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('入出庫履歴をクリアしますか？'),
+        content: const Text(
+          'すべての入荷・販売・廃棄・棚卸調整の履歴を削除します。\n\n'
+          '登録商品と現在庫は削除されません。'
+          '削除した履歴は元に戻せません。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('履歴をクリア'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || _busy) return;
+
+    setState(() => _busy = true);
+    try {
+      final deleted = await _repository.clearTransactionHistory();
+      if (!mounted) return;
+      _showSnackBar('入出庫履歴を$deleted件削除しました。商品と現在庫は維持されています。');
+      _reload();
+    } catch (error) {
+      if (!mounted) return;
+      await _showError('入出庫履歴をクリアできませんでした', error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _importCsv() async {
     if (_busy) return;
     setState(() => _busy = true);
@@ -360,6 +414,8 @@ class _InventoryManagementPageState extends State<InventoryManagementPage> {
                   onEdit: _addOrEditItem,
                   onMovement: _recordMovement,
                   onDeactivate: _deactivateItem,
+                  onClearHistory: _clearTransactionHistory,
+                  onMoveItem: _moveItem,
                 );
               },
             ),
@@ -848,12 +904,16 @@ class _InventoryBody extends StatelessWidget {
     required this.onEdit,
     required this.onMovement,
     required this.onDeactivate,
+    required this.onClearHistory,
+    required this.onMoveItem,
   });
 
   final InventoryDashboardData data;
   final ValueChanged<InventoryItem> onEdit;
   final ValueChanged<InventoryItem> onMovement;
   final ValueChanged<InventoryItem> onDeactivate;
+  final VoidCallback onClearHistory;
+  final void Function(InventoryItem item, int offset) onMoveItem;
 
   @override
   Widget build(BuildContext context) {
@@ -904,6 +964,8 @@ class _InventoryBody extends StatelessWidget {
               onEdit: () => onEdit(item),
               onMovement: () => onMovement(item),
               onDeactivate: () => onDeactivate(item),
+              onMoveUp: () => onMoveItem(item, -1),
+              onMoveDown: () => onMoveItem(item, 1),
             ),
         const SizedBox(height: 22),
         Row(
@@ -911,6 +973,14 @@ class _InventoryBody extends StatelessWidget {
             Text('最近の入出庫履歴', style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(width: 8),
             Text('最大50件', style: Theme.of(context).textTheme.bodySmall),
+            const Spacer(),
+            OutlinedButton.icon(
+              onPressed: data.recentTransactions.isEmpty
+                  ? null
+                  : onClearHistory,
+              icon: const Icon(Icons.delete_sweep_outlined),
+              label: const Text('履歴をクリア'),
+            ),
           ],
         ),
         const SizedBox(height: 8),
@@ -980,12 +1050,16 @@ class _InventoryItemCard extends StatelessWidget {
     required this.onEdit,
     required this.onMovement,
     required this.onDeactivate,
+    required this.onMoveUp,
+    required this.onMoveDown,
   });
 
   final InventoryItem item;
   final VoidCallback onEdit;
   final VoidCallback onMovement;
   final VoidCallback onDeactivate;
+  final VoidCallback onMoveUp;
+  final VoidCallback onMoveDown;
 
   @override
   Widget build(BuildContext context) {
@@ -1087,8 +1161,24 @@ class _InventoryItemCard extends StatelessWidget {
               tooltip: 'その他',
               onSelected: (value) {
                 if (value == 'deactivate') onDeactivate();
+                if (value == 'move_up') onMoveUp();
+                if (value == 'move_down') onMoveDown();
               },
               itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: 'move_up',
+                  child: ListTile(
+                    leading: Icon(Icons.arrow_upward),
+                    title: Text('上へ移動'),
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'move_down',
+                  child: ListTile(
+                    leading: Icon(Icons.arrow_downward),
+                    title: Text('下へ移動'),
+                  ),
+                ),
                 PopupMenuItem(value: 'deactivate', child: Text('使用停止にする')),
               ],
             ),

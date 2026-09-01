@@ -16,6 +16,7 @@ class InventoryRepository {
     bool lowStockOnly = false,
   }) async {
     final db = await _database();
+    await _ensureOrderTable(db);
     final normalizedSearch = searchText.trim();
     final where = <String>['active = 1'];
     final whereArgs = <Object?>[];
@@ -46,11 +47,7 @@ class InventoryRepository {
     ''');
 
     final localNow = DateTime.now();
-    final start = DateTime(
-      localNow.year,
-      localNow.month,
-      localNow.day,
-    ).toUtc();
+    final start = DateTime(localNow.year, localNow.month, localNow.day).toUtc();
     final end = start.add(const Duration(days: 1));
     final salesRows = await db.rawQuery(
       '''
@@ -67,8 +64,10 @@ class InventoryRepository {
       ],
     );
 
+    final items = itemRows.map(_itemFromRow).toList(growable: true);
+    await _sortItems(db, items);
     return InventoryDashboardData(
-      items: itemRows.map(_itemFromRow).toList(growable: false),
+      items: List.unmodifiable(items),
       recentTransactions: transactionRows
           .map(_transactionFromRow)
           .toList(growable: false),
@@ -80,12 +79,15 @@ class InventoryRepository {
 
   Future<List<InventoryItem>> loadItems({bool includeInactive = false}) async {
     final db = await _database();
+    await _ensureOrderTable(db);
     final rows = await db.query(
       'inventory_items',
       where: includeInactive ? null : 'active = 1',
       orderBy: 'category COLLATE NOCASE, name COLLATE NOCASE',
     );
-    return rows.map(_itemFromRow).toList(growable: false);
+    final items = rows.map(_itemFromRow).toList(growable: true);
+    await _sortItems(db, items);
+    return List.unmodifiable(items);
   }
 
   Future<InventoryItem?> findItemByIdentifier(String identifier) async {
@@ -94,8 +96,7 @@ class InventoryRepository {
     final db = await _database();
     final rows = await db.query(
       'inventory_items',
-      where:
-          'active = 1 AND (sync_key = ? OR sku = ? OR barcode = ?)',
+      where: 'active = 1 AND (sync_key = ? OR sku = ? OR barcode = ?)',
       whereArgs: [normalized, normalized, normalized],
       limit: 1,
     );
@@ -168,9 +169,7 @@ class InventoryRepository {
       return item.copyWith(updatedAt: now);
     } on DatabaseException catch (error) {
       if (error.isUniqueConstraintError()) {
-        throw const InventoryRepositoryException(
-          '同じ商品コードまたはバーコードが既に登録されています。',
-        );
+        throw const InventoryRepositoryException('同じ商品コードまたはバーコードが既に登録されています。');
       }
       throw InventoryRepositoryException('商品を保存できませんでした。\n$error');
     }
@@ -180,13 +179,64 @@ class InventoryRepository {
     final db = await _database();
     await db.update(
       'inventory_items',
-      {
-        'active': 0,
-        'updated_at': DateTime.now().toUtc().toIso8601String(),
-      },
+      {'active': 0, 'updated_at': DateTime.now().toUtc().toIso8601String()},
       where: 'id = ?',
       whereArgs: [itemId],
     );
+  }
+
+  Future<int> clearTransactionHistory() async {
+    final db = await _database();
+    return db.delete('inventory_transactions');
+  }
+
+  Future<void> moveItem({required int itemId, required int offset}) async {
+    if (offset != -1 && offset != 1) {
+      throw const InventoryRepositoryException('並び替え方向が正しくありません。');
+    }
+    final db = await _database();
+    await _ensureOrderTable(db);
+    await db.transaction((txn) async {
+      final rows = await txn.rawQuery('''
+        SELECT i.id
+        FROM inventory_items i
+        LEFT JOIN inventory_item_order o ON o.item_id = i.id
+        WHERE i.active = 1
+        ORDER BY
+          CASE WHEN o.sort_order IS NULL THEN 1 ELSE 0 END,
+          o.sort_order,
+          i.category COLLATE NOCASE,
+          i.name COLLATE NOCASE,
+          i.id
+      ''');
+      final ids = rows
+          .map((row) => _readInt(row['id']))
+          .where((id) => id > 0)
+          .toList(growable: false);
+      for (var index = 0; index < ids.length; index++) {
+        await txn.insert('inventory_item_order', {
+          'item_id': ids[index],
+          'sort_order': index,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      final currentIndex = ids.indexOf(itemId);
+      final targetIndex = currentIndex + offset;
+      if (currentIndex < 0 || targetIndex < 0 || targetIndex >= ids.length) {
+        return;
+      }
+      await txn.update(
+        'inventory_item_order',
+        {'sort_order': targetIndex},
+        where: 'item_id = ?',
+        whereArgs: [itemId],
+      );
+      await txn.update(
+        'inventory_item_order',
+        {'sort_order': currentIndex},
+        where: 'item_id = ?',
+        whereArgs: [ids[targetIndex]],
+      );
+    });
   }
 
   Future<InventoryTransaction> recordMovement({
@@ -243,7 +293,8 @@ class InventoryRepository {
         type: type,
         quantity: quantity,
       );
-      final effectiveUnitPrice = unitPriceYen ??
+      final effectiveUnitPrice =
+          unitPriceYen ??
           (type == InventoryTransactionType.sale
               ? item.salePriceYen
               : type == InventoryTransactionType.purchase
@@ -340,6 +391,42 @@ class InventoryRepository {
     return 'item-${now.microsecondsSinceEpoch}';
   }
 
+  static Future<void> _ensureOrderTable(DatabaseExecutor db) {
+    return db.execute('''
+      CREATE TABLE IF NOT EXISTS inventory_item_order (
+        item_id INTEGER PRIMARY KEY,
+        sort_order INTEGER NOT NULL,
+        FOREIGN KEY(item_id) REFERENCES inventory_items(id) ON DELETE CASCADE
+      )
+    ''');
+  }
+
+  static Future<void> _sortItems(
+    DatabaseExecutor db,
+    List<InventoryItem> items,
+  ) async {
+    if (items.length < 2) return;
+    final rows = await db.query('inventory_item_order');
+    final order = <int, int>{
+      for (final row in rows)
+        _readInt(row['item_id']): _readInt(row['sort_order']),
+    };
+    items.sort((left, right) {
+      final leftOrder = left.id == null ? null : order[left.id!];
+      final rightOrder = right.id == null ? null : order[right.id!];
+      if (leftOrder != null && rightOrder != null) {
+        return leftOrder.compareTo(rightOrder);
+      }
+      if (leftOrder != null) return -1;
+      if (rightOrder != null) return 1;
+      final category = left.category.toLowerCase().compareTo(
+        right.category.toLowerCase(),
+      );
+      if (category != 0) return category;
+      return left.name.toLowerCase().compareTo(right.name.toLowerCase());
+    });
+  }
+
   static String _transactionUuid(DateTime occurredAt) {
     return 'movement-${occurredAt.microsecondsSinceEpoch}-'
         '${DateTime.now().microsecondsSinceEpoch}';
@@ -367,9 +454,7 @@ class InventoryRepository {
     );
   }
 
-  static InventoryTransaction _transactionFromRow(
-    Map<String, Object?> row,
-  ) {
+  static InventoryTransaction _transactionFromRow(Map<String, Object?> row) {
     return InventoryTransaction(
       id: _readInt(row['id']),
       transactionUuid: row['transaction_uuid']?.toString() ?? '',

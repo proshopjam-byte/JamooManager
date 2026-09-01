@@ -106,9 +106,11 @@ class InventoryLanServerService {
       }
 
       if (!_isAuthorized(request)) {
-        await _jsonResponse(request.response, HttpStatus.unauthorized, {
-          'error': '接続コードが正しくありません。',
-        });
+        await _jsonResponse(
+          request.response,
+          HttpStatus.unauthorized,
+          {'error': '接続コードが正しくありません。'},
+        );
         return;
       }
 
@@ -128,13 +130,18 @@ class InventoryLanServerService {
         });
         return;
       }
-      if (request.method == 'POST' && path == '/api/v1/inventory/movements') {
+      if (request.method == 'POST' &&
+          path == '/api/v1/inventory/movements') {
         await _handleMovement(request);
         return;
       }
       if (request.method == 'POST' &&
           path == '/api/v1/inventory/items/barcode') {
         await _handleBarcodeAssignment(request);
+        return;
+      }
+      if (request.method == 'POST' && path == '/api/v1/inventory/items') {
+        await _handleItemCreation(request);
         return;
       }
 
@@ -251,9 +258,72 @@ class InventoryLanServerService {
         'このバーコードは「${alreadyAssigned.name}」に登録済みです。',
       );
     }
-    final saved = await repository.saveItem(item.copyWith(barcode: barcode));
+    final saved = await repository.saveItem(
+      item.copyWith(barcode: barcode),
+    );
     _changes.add(null);
     await _jsonResponse(request.response, HttpStatus.ok, {
+      'ok': true,
+      'item': _itemJson(saved),
+    });
+  }
+
+  Future<void> _handleItemCreation(HttpRequest request) async {
+    final content = await utf8.decoder.bind(request).join();
+    if (content.length > 100000) {
+      throw const FormatException('送信データが大きすぎます。');
+    }
+    final decoded = jsonDecode(content);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('送信データの形式が正しくありません。');
+    }
+
+    final barcode = decoded['barcode']?.toString().trim() ?? '';
+    final name = decoded['name']?.toString().trim() ?? '';
+    final category = decoded['category']?.toString().trim() ?? '';
+    final unit = decoded['unit']?.toString().trim() ?? '';
+    final currentStock = _readDouble(decoded['currentStock']);
+    final reorderLevel = _readDouble(decoded['reorderLevel']);
+    if (barcode.isEmpty || name.isEmpty || category.isEmpty || unit.isEmpty) {
+      throw const FormatException('バーコード、商品名、分類、単位は必須です。');
+    }
+    if (barcode.length > 100 || barcode.contains(RegExp(r'[\r\n\t]'))) {
+      throw const FormatException('バーコードの形式が正しくありません。');
+    }
+    if (name.length > 200 || category.length > 100 || unit.length > 30) {
+      throw const FormatException('入力文字数が上限を超えています。');
+    }
+    if (currentStock < 0 || reorderLevel < 0) {
+      throw const FormatException('在庫数と最低在庫は0以上で入力してください。');
+    }
+
+    const repository = InventoryRepository();
+    final existing = await repository.findItemByIdentifier(barcode);
+    if (existing != null) {
+      throw InventoryRepositoryException(
+        'このバーコードは「${existing.name}」に登録済みです。',
+      );
+    }
+    final saved = await repository.saveItem(
+      InventoryItem(
+        syncKey: InventoryRepository.createSyncKey(),
+        sku: _nullableText(decoded['sku']),
+        barcode: barcode,
+        name: name,
+        category: category,
+        unit: unit,
+        currentStock: currentStock,
+        reorderLevel: reorderLevel,
+        costPriceYen: _readNullableInt(decoded['costPriceYen']),
+        salePriceYen: _readNullableInt(decoded['salePriceYen']),
+        supplier: _nullableText(decoded['supplier']),
+        saleEnabled: decoded['saleEnabled'] != false,
+        active: true,
+        notes: _nullableText(decoded['notes']),
+      ),
+    );
+    _changes.add(null);
+    await _jsonResponse(request.response, HttpStatus.created, {
       'ok': true,
       'item': _itemJson(saved),
     });
@@ -303,7 +373,10 @@ class InventoryLanServerService {
     await response.close();
   }
 
-  static Future<void> _htmlResponse(HttpResponse response, String body) async {
+  static Future<void> _htmlResponse(
+    HttpResponse response,
+    String body,
+  ) async {
     response.statusCode = HttpStatus.ok;
     response.headers.contentType = ContentType.html;
     response.headers.set(
@@ -347,7 +420,11 @@ class InventoryLanServerService {
     return port != null && port >= 1024 && port <= 65535 ? port : null;
   }
 
-  static Future<void> _saveMetadata(Database db, String key, String value) {
+  static Future<void> _saveMetadata(
+    Database db,
+    String key,
+    String value,
+  ) {
     return db.insert('app_metadata', {
       'key': key,
       'value': value,
