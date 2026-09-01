@@ -197,6 +197,31 @@ void main() {
     expect(inventoryMobilePageHtml, contains('棚卸調整'));
     expect(inventoryMobilePageHtml, contains('setInterval'));
     expect(inventoryMobilePageHtml, contains('コード再入力'));
+    expect(inventoryMobilePageHtml, contains('バーコード読み取り'));
+    expect(inventoryMobilePageHtml, contains('capture="environment"'));
+    expect(inventoryMobilePageHtml, contains('BarcodeDetector'));
+    expect(inventoryMobilePageHtml, contains('decodeEan13'));
+    expect(inventoryMobilePageHtml, contains('USBバーコードリーダー'));
+  });
+
+  test('既存商品にバーコードを登録して番号で検索できる', () async {
+    final item = await repository.saveItem(
+      InventoryItem(
+        syncKey: InventoryRepository.createSyncKey(),
+        name: 'バーコード登録テスト',
+        category: '食品',
+        unit: '個',
+        currentStock: 2,
+        reorderLevel: 1,
+        saleEnabled: true,
+        active: true,
+      ),
+    );
+
+    await repository.saveItem(item.copyWith(barcode: '4901234567894'));
+
+    final found = await repository.findItemByIdentifier('4901234567894');
+    expect(found?.name, 'バーコード登録テスト');
   });
 
   test('旧設定ファイルでも在庫管理は初期値で有効になる', () {

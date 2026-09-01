@@ -27,6 +27,7 @@ class _InventoryManagementPageState extends State<InventoryManagementPage> {
 
   Future<InventoryDashboardData>? _future;
   StreamSubscription<void>? _inventoryChangeSubscription;
+  InventoryLanServerStatus? _connectionStatus;
   bool _lowStockOnly = false;
   bool _busy = false;
 
@@ -38,6 +39,9 @@ class _InventoryManagementPageState extends State<InventoryManagementPage> {
         .listen((_) {
           if (mounted) _reload();
         });
+    if (InventoryLanServerService.instance.isRunning) {
+      unawaited(_restoreConnectionStatus());
+    }
   }
 
   @override
@@ -54,6 +58,11 @@ class _InventoryManagementPageState extends State<InventoryManagementPage> {
         lowStockOnly: _lowStockOnly,
       );
     });
+  }
+
+  Future<void> _restoreConnectionStatus() async {
+    final status = await InventoryLanServerService.instance.status();
+    if (mounted) setState(() => _connectionStatus = status);
   }
 
   Future<void> _addOrEditItem([InventoryItem? existing]) async {
@@ -181,25 +190,43 @@ class _InventoryManagementPageState extends State<InventoryManagementPage> {
         facilityName: widget.facilityName,
       );
       if (!mounted) return;
-      await showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (dialogContext) => _InventoryDeviceConnectionDialog(
-          status: status,
-          onStop: () async {
-            await InventoryLanServerService.instance.stop();
-            if (dialogContext.mounted) {
-              Navigator.of(dialogContext).pop();
-            }
-            if (mounted) {
-              _showSnackBar('端末接続を停止しました。');
-            }
-          },
-        ),
-      );
+      setState(() => _connectionStatus = status);
+      _showSnackBar('端末接続を開始しました。');
     } catch (error) {
       if (!mounted) return;
       await _showError('端末接続を開始できませんでした', error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _showConnectionDetails() async {
+    final status = _connectionStatus;
+    if (status == null) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => _InventoryDeviceConnectionDialog(
+        status: status,
+        onStop: () async {
+          await InventoryLanServerService.instance.stop();
+          if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+          if (mounted) {
+            setState(() => _connectionStatus = null);
+            _showSnackBar('端末接続を停止しました。');
+          }
+        },
+      ),
+    );
+  }
+
+  Future<void> _stopDeviceConnection() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await InventoryLanServerService.instance.stop();
+      if (!mounted) return;
+      setState(() => _connectionStatus = null);
+      _showSnackBar('端末接続を停止しました。');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -264,6 +291,12 @@ class _InventoryManagementPageState extends State<InventoryManagementPage> {
       body: Column(
         children: [
           if (_busy) const LinearProgressIndicator(),
+          if (_connectionStatus != null)
+            _InventoryConnectionStatusCard(
+              status: _connectionStatus!,
+              onDetails: _showConnectionDetails,
+              onStop: _stopDeviceConnection,
+            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
             child: Row(
@@ -645,6 +678,62 @@ class _InventoryManagementPageState extends State<InventoryManagementPage> {
 
   static int? _nullableInt(String value) =>
       int.tryParse(value.replaceAll(',', '').replaceAll('¥', '').trim());
+}
+
+class _InventoryConnectionStatusCard extends StatelessWidget {
+  const _InventoryConnectionStatusCard({
+    required this.status,
+    required this.onDetails,
+    required this.onStop,
+  });
+
+  final InventoryLanServerStatus status;
+  final VoidCallback onDetails;
+  final VoidCallback onStop;
+
+  @override
+  Widget build(BuildContext context) {
+    final url = status.serverUrls.isEmpty
+        ? '接続アドレスを取得できません'
+        : status.serverUrls.first;
+    final token = status.accessToken ?? '';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      child: Card(
+        color: Theme.of(context).colorScheme.primaryContainer,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              const Icon(Icons.devices_outlined),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '端末接続中',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    SelectableText('$url    接続コード $token'),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: '接続情報をコピー',
+                onPressed: () => Clipboard.setData(
+                  ClipboardData(text: '$url\n接続コード: $token'),
+                ),
+                icon: const Icon(Icons.copy_outlined),
+              ),
+              TextButton(onPressed: onDetails, child: const Text('詳細')),
+              TextButton(onPressed: onStop, child: const Text('停止')),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _InventoryDeviceConnectionDialog extends StatelessWidget {

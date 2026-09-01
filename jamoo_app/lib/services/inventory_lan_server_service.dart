@@ -132,6 +132,11 @@ class InventoryLanServerService {
         await _handleMovement(request);
         return;
       }
+      if (request.method == 'POST' &&
+          path == '/api/v1/inventory/items/barcode') {
+        await _handleBarcodeAssignment(request);
+        return;
+      }
 
       await _jsonResponse(request.response, HttpStatus.notFound, {
         'error': '指定された機能が見つかりません。',
@@ -211,6 +216,46 @@ class InventoryLanServerService {
       'quantityChange': transaction.quantityChange,
       'stockAfter': transaction.stockAfter,
       'totalYen': transaction.totalYen,
+    });
+  }
+
+  Future<void> _handleBarcodeAssignment(HttpRequest request) async {
+    final content = await utf8.decoder.bind(request).join();
+    if (content.length > 100000) {
+      throw const FormatException('送信データが大きすぎます。');
+    }
+    final decoded = jsonDecode(content);
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('送信データの形式が正しくありません。');
+    }
+    final identifier = decoded['itemIdentifier']?.toString().trim() ?? '';
+    final barcode = decoded['barcode']?.toString().trim() ?? '';
+    if (identifier.isEmpty || barcode.isEmpty) {
+      throw const FormatException('商品とバーコードを指定してください。');
+    }
+    if (barcode.length > 100 || barcode.contains(RegExp(r'[\r\n\t]'))) {
+      throw const FormatException('バーコードの形式が正しくありません。');
+    }
+
+    const repository = InventoryRepository();
+    final item = await repository.findItemByIdentifier(identifier);
+    if (item == null) {
+      await _jsonResponse(request.response, HttpStatus.notFound, {
+        'error': '商品が見つかりません。',
+      });
+      return;
+    }
+    final alreadyAssigned = await repository.findItemByIdentifier(barcode);
+    if (alreadyAssigned != null && alreadyAssigned.id != item.id) {
+      throw InventoryRepositoryException(
+        'このバーコードは「${alreadyAssigned.name}」に登録済みです。',
+      );
+    }
+    final saved = await repository.saveItem(item.copyWith(barcode: barcode));
+    _changes.add(null);
+    await _jsonResponse(request.response, HttpStatus.ok, {
+      'ok': true,
+      'item': _itemJson(saved),
     });
   }
 
