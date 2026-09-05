@@ -87,7 +87,9 @@ void main() {
     final arrivalKey = RoomAssignmentService.reservationKey(newArrival);
 
     expect(
-      result.rows.singleWhere((row) => row.reservationKey == continuingKey).roomNumber,
+      result.rows
+          .singleWhere((row) => row.reservationKey == continuingKey)
+          .roomNumber,
       1,
     );
     final arrivalRow = result.rows.singleWhere(
@@ -112,19 +114,18 @@ void main() {
       rooms: rooms,
       stayDate: DateTime(2026, 8, 30),
     );
-    final savedRows = service.create([continuing]).rows.map((row) {
-      if (!row.hasReservation) return row;
-      return row.copyWith(
-        guestCount: 1,
-        guestCountManuallyChanged: true,
-      );
-    }).toList(growable: false);
+    final savedRows = service
+        .create([continuing])
+        .rows
+        .map((row) {
+          if (!row.hasReservation) return row;
+          return row.copyWith(guestCount: 1, guestCountManuallyChanged: true);
+        })
+        .toList(growable: false);
 
-    final result = service.reconcileWithCarryForward(
-      savedRows,
-      const [],
-      [continuing],
-    );
+    final result = service.reconcileWithCarryForward(savedRows, const [], [
+      continuing,
+    ]);
     final assigned = result.rows.where((row) => row.hasReservation).toList();
 
     expect(assigned, hasLength(1));
@@ -146,13 +147,14 @@ void main() {
       rooms: rooms,
       stayDate: DateTime(2026, 8, 30),
     );
-    final previousRows = previousService.create([continuing]).rows.map((row) {
-      if (!row.hasReservation) return row;
-      return row.copyWith(
-        guestCount: 1,
-        guestCountManuallyChanged: true,
-      );
-    }).toList(growable: false);
+    final previousRows = previousService
+        .create([continuing])
+        .rows
+        .map((row) {
+          if (!row.hasReservation) return row;
+          return row.copyWith(guestCount: 1, guestCountManuallyChanged: true);
+        })
+        .toList(growable: false);
 
     final result = RoomAssignmentService(
       rooms: rooms,
@@ -233,16 +235,18 @@ void main() {
       rooms: rooms,
       stayDate: DateTime(2026, 8, 29),
     );
-    final savedRows = service.create([continuing]).rows.map((row) {
-      if (!row.hasReservation) return row;
-      return row.copyWith(notes: '低い枕を希望');
-    }).toList(growable: false);
+    final savedRows = service
+        .create([continuing])
+        .rows
+        .map((row) {
+          if (!row.hasReservation) return row;
+          return row.copyWith(notes: '低い枕を希望');
+        })
+        .toList(growable: false);
 
-    final result = service.reconcileWithCarryForward(
-      savedRows,
-      const [],
-      [continuing],
-    );
+    final result = service.reconcileWithCarryForward(savedRows, const [], [
+      continuing,
+    ]);
     final row = result.rows.firstWhere((value) => value.hasReservation);
 
     expect(row.notes, '連泊開始（1泊目／全2泊）・低い枕を希望');
@@ -346,7 +350,7 @@ void main() {
     expect(result.warnings, isEmpty);
   });
 
-  test('旧設定でも大人数を大部屋と近い小部屋へ割り当てる', () {
+  test('ロフト付きの5名予約は隣室と3名・2名に分ける', () {
     const legacyRooms = [
       GuestRoomSpec(
         number: 1,
@@ -404,6 +408,126 @@ void main() {
         .toSet();
 
     expect(assignedRooms, {2, 3});
+    expect(
+      result.rows
+          .where((row) => row.hasReservation)
+          .map((row) => row.guestCount)
+          .toSet(),
+      {3, 2},
+    );
+    expect(result.warnings, isEmpty);
+  });
+
+  test('5名の3・2配室を手動で4・1に変更しても保持する', () {
+    const legacyRooms = [
+      GuestRoomSpec(
+        number: 2,
+        label: 'ロフト付き',
+        normalCapacity: 4,
+        capacity: 5,
+        type: GuestRoomType.loft,
+        adjacentRoomNumbers: [3],
+      ),
+      GuestRoomSpec(
+        number: 3,
+        label: 'ツイン',
+        normalCapacity: 2,
+        capacity: 3,
+        type: GuestRoomType.standardTwin,
+        adjacentRoomNumbers: [2],
+      ),
+    ];
+    final reservation = _reservation(
+      id: 'five-guests-manual',
+      guestName: '五名 手動調整',
+      checkIn: DateTime(2026, 9, 5),
+      checkOut: DateTime(2026, 9, 6),
+      guests: 5,
+      priceYen: 35400,
+      roomName: 'ロフト付き4人部屋',
+    );
+    final service = RoomAssignmentService(
+      rooms: legacyRooms,
+      stayDate: DateTime(2026, 9, 5),
+    );
+    final manuallyAdjusted = service
+        .create([reservation])
+        .rows
+        .map((row) {
+          if (row.roomNumber == 2) {
+            return row.copyWith(guestCount: 4, guestCountManuallyChanged: true);
+          }
+          if (row.roomNumber == 3) {
+            return row.copyWith(guestCount: 1, guestCountManuallyChanged: true);
+          }
+          return row;
+        })
+        .toList(growable: false);
+
+    final result = service.reconcileWithCarryForward(
+      manuallyAdjusted,
+      const [],
+      [reservation],
+    );
+
+    expect(result.rows.singleWhere((row) => row.roomNumber == 2).guestCount, 4);
+    expect(result.rows.singleWhere((row) => row.roomNumber == 3).guestCount, 1);
+    expect(result.warnings, isEmpty);
+  });
+
+  test('ロフトの最大定員を超える6名は通常定員と隣室に分ける', () {
+    const legacyRooms = [
+      GuestRoomSpec(
+        number: 2,
+        label: 'ロフト付き',
+        normalCapacity: 4,
+        capacity: 5,
+        type: GuestRoomType.loft,
+        adjacentRoomNumbers: [3],
+      ),
+      GuestRoomSpec(
+        number: 3,
+        label: 'ツイン',
+        normalCapacity: 2,
+        capacity: 3,
+        type: GuestRoomType.standardTwin,
+        adjacentRoomNumbers: [2],
+      ),
+      GuestRoomSpec(
+        number: 7,
+        label: 'ツイン',
+        normalCapacity: 2,
+        capacity: 3,
+        type: GuestRoomType.standardTwin,
+        adjacentRoomNumbers: [8],
+      ),
+      GuestRoomSpec(
+        number: 8,
+        label: 'ロフト付き',
+        normalCapacity: 4,
+        capacity: 5,
+        type: GuestRoomType.loft,
+        adjacentRoomNumbers: [7],
+      ),
+    ];
+    final reservation = _reservation(
+      id: 'six-guests',
+      guestName: '六名 グループ',
+      checkIn: DateTime(2026, 9, 5),
+      checkOut: DateTime(2026, 9, 6),
+      guests: 6,
+      priceYen: 58200,
+      roomName: 'ロフト付き4人部屋',
+    );
+
+    final result = RoomAssignmentService(
+      rooms: legacyRooms,
+      stayDate: DateTime(2026, 9, 5),
+    ).create([reservation]);
+    final assigned = result.rows.where((row) => row.hasReservation).toList();
+
+    expect(assigned.map((row) => row.roomNumber).toSet(), {2, 3});
+    expect(assigned.map((row) => row.guestCount).toSet(), {4, 2});
     expect(result.warnings, isEmpty);
   });
 
@@ -439,10 +563,7 @@ void main() {
       stayDate: DateTime(2026, 8, 29),
     ).create([reservation]);
 
-    expect(
-      result.rows.where((row) => row.hasReservation).length,
-      2,
-    );
+    expect(result.rows.where((row) => row.hasReservation).length, 2);
     expect(result.warnings, isEmpty);
   });
 

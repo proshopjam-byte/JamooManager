@@ -14,9 +14,9 @@ class RoomAssignmentService {
     required DateTime stayDate,
   }) : stayDate = DateTime(stayDate.year, stayDate.month, stayDate.day),
        rooms = List.unmodifiable(
-        List<GuestRoomSpec>.from(rooms)
-          ..sort((first, second) => first.number.compareTo(second.number)),
-      );
+         List<GuestRoomSpec>.from(rooms)
+           ..sort((first, second) => first.number.compareTo(second.number)),
+       );
 
   final List<GuestRoomSpec> rooms;
   final DateTime stayDate;
@@ -91,10 +91,7 @@ class RoomAssignmentService {
       for (final row in currentRows)
         row.roomNumber:
             row.hasReservation && activeKeys.contains(row.reservationKey)
-            ? _refreshSavedRow(
-                row,
-                reservationByKey[row.reservationKey]!,
-              )
+            ? _refreshSavedRow(row, reservationByKey[row.reservationKey]!)
             : CheckinSheetRow.empty(row.roomNumber),
     };
     final rows = rooms
@@ -183,8 +180,7 @@ class RoomAssignmentService {
     for (final entry in reservationByKey.entries) {
       final manuallyAdjusted = rows.any(
         (row) =>
-            row.reservationKey == entry.key &&
-            row.guestCountManuallyChanged,
+            row.reservationKey == entry.key && row.guestCountManuallyChanged,
       );
       if (manuallyAdjusted) continue;
       final assigned = rows
@@ -224,8 +220,7 @@ class RoomAssignmentService {
     for (final reservation in sortedReservations) {
       final key = reservationKey(reservation);
       final manuallyAdjusted = rows.any(
-        (row) =>
-            row.reservationKey == key && row.guestCountManuallyChanged,
+        (row) => row.reservationKey == key && row.guestCountManuallyChanged,
       );
       if (manuallyAdjusted) continue;
       final alreadyAssigned = rows
@@ -292,9 +287,11 @@ class RoomAssignmentService {
         if (room == null || !room.isAvailable) {
           continue;
         }
-        final count = remainingGuests > room.normalCapacity
-            ? room.normalCapacity
-            : remainingGuests;
+        final count = _automaticAssignmentCount(
+          reservation: reservation,
+          room: room,
+          remainingGuests: remainingGuests,
+        );
         rows[index] = _rowForReservation(
           roomNumber: roomNumber,
           reservation: reservation,
@@ -364,10 +361,9 @@ class RoomAssignmentService {
     });
 
     final primary = available.first;
-    final remainingGuests = (requestedGuests - primary.normalCapacity).clamp(
-      1,
-      requestedGuests,
-    ).toInt();
+    final remainingGuests = (requestedGuests - primary.normalCapacity)
+        .clamp(1, requestedGuests)
+        .toInt();
     final remainingRooms = available.skip(1).toList()
       ..sort((first, second) {
         final firstAdjacent = _areAdjacent(primary, first);
@@ -381,10 +377,7 @@ class RoomAssignmentService {
         if (differenceOrder != 0) return differenceOrder;
         return _compareDistance(first, second, primary.number);
       });
-    return [
-      primary.number,
-      ...remainingRooms.map((room) => room.number),
-    ];
+    return [primary.number, ...remainingRooms.map((room) => room.number)];
   }
 
   List<_PlannedRoom> _specifiedRoomPlan(Reservation reservation) {
@@ -413,7 +406,8 @@ class RoomAssignmentService {
         r'[x×]\s*(\d+)',
         caseSensitive: false,
       ).firstMatch(segment);
-      final roomCount = int.tryParse(
+      final roomCount =
+          int.tryParse(
             countMatch?.group(1) ?? suffixCountMatch?.group(1) ?? '',
           ) ??
           1;
@@ -448,7 +442,15 @@ class RoomAssignmentService {
     var remaining = guestCount(reservation, stayDate: stayDate);
     if (requests.length == 1 && requests.first.specifiedGuests == null) {
       final normalCapacity = _capacityForRequest(requests.first);
-      final count = remaining > normalCapacity ? normalCapacity : remaining;
+      final maximumCapacity = _capacityForRequest(
+        requests.first,
+        maximum: true,
+      );
+      final count = _initialRoomGuestCount(
+        guestCount: remaining,
+        normalCapacity: normalCapacity,
+        maximumCapacity: maximumCapacity,
+      );
       counts[0] = count;
       remaining -= count;
     }
@@ -464,12 +466,11 @@ class RoomAssignmentService {
       remaining -= count;
     }
 
-    final unspecified =
-        <int>[
-          for (var index = 0; index < requests.length; index++)
-            if (requests[index].specifiedGuests == null && counts[index] == 0)
-              index,
-        ];
+    final unspecified = <int>[
+      for (var index = 0; index < requests.length; index++)
+        if (requests[index].specifiedGuests == null && counts[index] == 0)
+          index,
+    ];
 
     for (var position = 0; position < unspecified.length; position++) {
       final index = unspecified[position];
@@ -489,9 +490,9 @@ class RoomAssignmentService {
     final selectedRooms = <GuestRoomSpec>[];
     final usedRoomNumbers = <int>{};
     for (var index = 0; index < requests.length; index++) {
-      final candidates = _roomsForRequest(requests[index])
-          .where((room) => !usedRoomNumbers.contains(room.number))
-          .toList();
+      final candidates = _roomsForRequest(
+        requests[index],
+      ).where((room) => !usedRoomNumbers.contains(room.number)).toList();
       if (candidates.isEmpty) continue;
       candidates.sort((first, second) {
         final firstAdjacent = selectedRooms.any(
@@ -530,10 +531,7 @@ class RoomAssignmentService {
     return plan;
   }
 
-  int _capacityForRequest(
-    _RequestedRoom request, {
-    bool maximum = false,
-  }) {
+  int _capacityForRequest(_RequestedRoom request, {bool maximum = false}) {
     final matching = _roomsForRequest(request);
     if (matching.isEmpty) {
       return 1;
@@ -558,17 +556,19 @@ class RoomAssignmentService {
 
   GuestRoomSpec? _configuredRoomForSegment(String segment) {
     final normalized = _roomTypeKey(segment);
-    final matching = rooms
-        .where(
-          (room) =>
-              room.isAvailable &&
-              _roomTypeKey(room.label).length >= 2 &&
-              normalized.contains(_roomTypeKey(room.label)),
-        )
-        .toList()
-      ..sort(
-        (first, second) => second.label.length.compareTo(first.label.length),
-      );
+    final matching =
+        rooms
+            .where(
+              (room) =>
+                  room.isAvailable &&
+                  _roomTypeKey(room.label).length >= 2 &&
+                  normalized.contains(_roomTypeKey(room.label)),
+            )
+            .toList()
+          ..sort(
+            (first, second) =>
+                second.label.length.compareTo(first.label.length),
+          );
     return matching.isEmpty ? null : matching.first;
   }
 
@@ -621,10 +621,7 @@ class RoomAssignmentService {
   }
 
   static String _roomTypeKey(String value) {
-    return value
-        .trim()
-        .toLowerCase()
-        .replaceAll(RegExp(r'[\s　・\-_/]+'), '');
+    return value.trim().toLowerCase().replaceAll(RegExp(r'[\s　・\-_/]+'), '');
   }
 
   GuestRoomSpec? _roomByNumber(int roomNumber) {
@@ -708,6 +705,40 @@ class RoomAssignmentService {
         : previousRow.guestCount.clamp(1, maximumForRoom).toInt();
   }
 
+  int _automaticAssignmentCount({
+    required Reservation reservation,
+    required GuestRoomSpec room,
+    required int remainingGuests,
+  }) {
+    if (reservation.roomCount <= 1) {
+      return _initialRoomGuestCount(
+        guestCount: remainingGuests,
+        normalCapacity: room.normalCapacity,
+        maximumCapacity: room.capacity,
+      );
+    }
+    return remainingGuests > room.normalCapacity
+        ? room.normalCapacity
+        : remainingGuests;
+  }
+
+  static int _initialRoomGuestCount({
+    required int guestCount,
+    required int normalCapacity,
+    required int maximumCapacity,
+  }) {
+    // Jamoo's five-person groups use the loft room and its adjacent twin as
+    // 3 + 2. This avoids an impractical 4 + 1 split while leaving both room
+    // counts available for manual adjustment on the check-in sheet.
+    if (guestCount == 5 && normalCapacity >= 4 && maximumCapacity >= 5) {
+      return 3;
+    }
+    if (guestCount <= maximumCapacity) {
+      return guestCount;
+    }
+    return guestCount > normalCapacity ? normalCapacity : guestCount;
+  }
+
   CheckinSheetRow _refreshSavedRow(
     CheckinSheetRow row,
     Reservation reservation,
@@ -716,10 +747,7 @@ class RoomAssignmentService {
     if (progressLabel == null) return row;
 
     final savedNotes = row.notes
-        .replaceAll(
-          RegExp(r'連泊(?:開始|中)（\d+泊目／全\d+泊）'),
-          '',
-        )
+        .replaceAll(RegExp(r'連泊(?:開始|中)（\d+泊目／全\d+泊）'), '')
         .split('・')
         .map((value) => value.trim())
         .where((value) => value.isNotEmpty)
@@ -782,10 +810,7 @@ class RoomAssignmentService {
     return '';
   }
 
-  static int guestCount(
-    Reservation reservation, {
-    DateTime? stayDate,
-  }) {
+  static int guestCount(Reservation reservation, {DateTime? stayDate}) {
     if (stayDate != null) {
       final dailyCount = reservation.totalGuestsOn(stayDate);
       return dailyCount <= 0 ? 1 : dailyCount;
