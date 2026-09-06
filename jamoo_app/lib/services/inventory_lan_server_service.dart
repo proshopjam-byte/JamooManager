@@ -6,6 +6,8 @@ import 'dart:math';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../models/inventory.dart';
+import '../models/reservation.dart';
+import '../repositories/database_reservation_repository.dart';
 import '../repositories/inventory_repository.dart';
 import 'database_service.dart';
 import 'inventory_mobile_page.dart';
@@ -106,11 +108,9 @@ class InventoryLanServerService {
       }
 
       if (!_isAuthorized(request)) {
-        await _jsonResponse(
-          request.response,
-          HttpStatus.unauthorized,
-          {'error': '接続コードが正しくありません。'},
-        );
+        await _jsonResponse(request.response, HttpStatus.unauthorized, {
+          'error': '接続コードが正しくありません。',
+        });
         return;
       }
 
@@ -130,8 +130,11 @@ class InventoryLanServerService {
         });
         return;
       }
-      if (request.method == 'POST' &&
-          path == '/api/v1/inventory/movements') {
+      if (request.method == 'GET' && path == '/api/v1/reservations/calendar') {
+        await _handleReservationCalendar(request);
+        return;
+      }
+      if (request.method == 'POST' && path == '/api/v1/inventory/movements') {
         await _handleMovement(request);
         return;
       }
@@ -226,6 +229,32 @@ class InventoryLanServerService {
     });
   }
 
+  Future<void> _handleReservationCalendar(HttpRequest request) async {
+    final monthText = request.uri.queryParameters['month']?.trim() ?? '';
+    final match = RegExp(r'^(\d{4})-(\d{2})$').firstMatch(monthText);
+    if (match == null) {
+      throw const FormatException('年月はYYYY-MM形式で指定してください。');
+    }
+    final year = int.parse(match.group(1)!);
+    final month = int.parse(match.group(2)!);
+    if (year < 2020 || year > 2100 || month < 1 || month > 12) {
+      throw const FormatException('年月が正しくありません。');
+    }
+    final firstDay = DateTime(year, month, 1);
+    final lastDay = DateTime(year, month + 1, 0);
+    final reservations = await const DatabaseReservationRepository()
+        .loadReservationsOverlapping(
+          firstDay.subtract(const Duration(days: 1)),
+          lastDay,
+        );
+    await _jsonResponse(request.response, HttpStatus.ok, {
+      'month': monthText,
+      'reservations': reservations
+          .map(_reservationJson)
+          .toList(growable: false),
+    });
+  }
+
   Future<void> _handleBarcodeAssignment(HttpRequest request) async {
     final content = await utf8.decoder.bind(request).join();
     if (content.length > 100000) {
@@ -258,9 +287,7 @@ class InventoryLanServerService {
         'このバーコードは「${alreadyAssigned.name}」に登録済みです。',
       );
     }
-    final saved = await repository.saveItem(
-      item.copyWith(barcode: barcode),
-    );
+    final saved = await repository.saveItem(item.copyWith(barcode: barcode));
     _changes.add(null);
     await _jsonResponse(request.response, HttpStatus.ok, {
       'ok': true,
@@ -300,9 +327,7 @@ class InventoryLanServerService {
     const repository = InventoryRepository();
     final existing = await repository.findItemByIdentifier(barcode);
     if (existing != null) {
-      throw InventoryRepositoryException(
-        'このバーコードは「${existing.name}」に登録済みです。',
-      );
+      throw InventoryRepositoryException('このバーコードは「${existing.name}」に登録済みです。');
     }
     final saved = await repository.saveItem(
       InventoryItem(
@@ -352,6 +377,40 @@ class InventoryLanServerService {
     };
   }
 
+  static Map<String, Object?> _reservationJson(Reservation reservation) {
+    return {
+      'id': reservation.id,
+      'source': reservation.source,
+      'reservationNumber': reservation.reservationNumber,
+      'guestName': reservation.displayGuestName,
+      'roomName': reservation.displayRoomName,
+      'roomCount': reservation.roomCount,
+      'checkIn': _dateText(reservation.checkIn),
+      'checkOut': _dateText(reservation.checkOut),
+      'adults': reservation.adults,
+      'children': reservation.children,
+      'childrenWithBed': reservation.childrenWithBed,
+      'childrenWithoutBed': reservation.childrenWithoutBed,
+      'totalGuests': reservation.totalGuests,
+      'arrivalTime': reservation.arrivalTime,
+      'hasBreakfast': reservation.hasBreakfast,
+      'breakfastGuestCount': reservation.breakfastGuestCount,
+      'hasDinner': reservation.hasDinner,
+      'planName': reservation.planName,
+      'dailyGuestCounts': reservation.dailyGuestCounts
+          .map((count) => count.toJson())
+          .toList(growable: false),
+    };
+  }
+
+  static String? _dateText(DateTime? value) {
+    if (value == null) return null;
+    final year = value.year.toString().padLeft(4, '0');
+    final month = value.month.toString().padLeft(2, '0');
+    final day = value.day.toString().padLeft(2, '0');
+    return '$year-$month-$day';
+  }
+
   static void _setCommonHeaders(HttpResponse response) {
     response.headers.set('Access-Control-Allow-Origin', '*');
     response.headers.set(
@@ -373,10 +432,7 @@ class InventoryLanServerService {
     await response.close();
   }
 
-  static Future<void> _htmlResponse(
-    HttpResponse response,
-    String body,
-  ) async {
+  static Future<void> _htmlResponse(HttpResponse response, String body) async {
     response.statusCode = HttpStatus.ok;
     response.headers.contentType = ContentType.html;
     response.headers.set(
@@ -420,11 +476,7 @@ class InventoryLanServerService {
     return port != null && port >= 1024 && port <= 65535 ? port : null;
   }
 
-  static Future<void> _saveMetadata(
-    Database db,
-    String key,
-    String value,
-  ) {
+  static Future<void> _saveMetadata(Database db, String key, String value) {
     return db.insert('app_metadata', {
       'key': key,
       'value': value,

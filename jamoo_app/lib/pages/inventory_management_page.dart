@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../models/inventory.dart';
 import '../repositories/inventory_repository.dart';
+import '../services/inventory_barcode_label_service.dart';
 import '../services/inventory_csv_service.dart';
 import '../services/inventory_lan_server_service.dart';
 
@@ -20,6 +21,8 @@ class InventoryManagementPage extends StatefulWidget {
 
 class _InventoryManagementPageState extends State<InventoryManagementPage> {
   final InventoryRepository _repository = const InventoryRepository();
+  final InventoryBarcodeLabelService _barcodeLabelService =
+      const InventoryBarcodeLabelService();
   late final InventoryCsvService _csvService = InventoryCsvService(
     repository: _repository,
   );
@@ -472,10 +475,45 @@ class _InventoryManagementPageState extends State<InventoryManagementPage> {
                     ),
                     _DialogField(controller: unit, label: '単位', width: 180),
                     _DialogField(controller: sku, label: '商品コード', width: 210),
-                    _DialogField(
-                      controller: barcode,
-                      label: 'バーコード・QRコード',
+                    SizedBox(
                       width: 404,
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: _DialogField(
+                              controller: barcode,
+                              label: 'バーコード・QRコード',
+                              width: 270,
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: '専用バーコードを自動発行',
+                            onPressed: () async {
+                              try {
+                                final generated = await _barcodeLabelService
+                                    .generateUniqueBarcode();
+                                if (!context.mounted) return;
+                                setDialogState(() => barcode.text = generated);
+                              } catch (error) {
+                                if (!context.mounted) return;
+                                await _showError('バーコードを発行できませんでした', error);
+                              }
+                            },
+                            icon: const Icon(Icons.auto_awesome_outlined),
+                          ),
+                          IconButton(
+                            tooltip: 'バーコードラベルを印刷',
+                            onPressed: () =>
+                                _barcodeLabelService.showPrintDialog(
+                                  context,
+                                  itemName: name.text,
+                                  barcode: barcode.text,
+                                  salePriceYen: _nullableInt(sale.text),
+                                ),
+                            icon: const Icon(Icons.print_outlined),
+                          ),
+                        ],
+                      ),
                     ),
                     _DialogField(controller: category, label: '分類', width: 210),
                     _DialogField(

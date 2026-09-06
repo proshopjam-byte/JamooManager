@@ -1,3 +1,4 @@
+import 'services/inventory_lan_auto_start_service.dart';
 import 'package:flutter/material.dart';
 
 import 'models/app_settings.dart';
@@ -19,6 +20,8 @@ import 'services/portal_sync_service.dart';
 import 'services/reservation_import_service.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  InventoryLanAutoStartService.instance.start();
   runApp(const JamooManagerApp());
 }
 
