@@ -5,6 +5,8 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import 'windows_pdf_font_service.dart';
+
 import '../models/checkin_sheet.dart';
 import '../models/facility_settings.dart';
 
@@ -63,8 +65,9 @@ class CheckinSheetPrintService {
     FacilitySettings facilitySettings,
   ) async {
     final document = pw.Document();
-    final regular = await PdfGoogleFonts.notoSansJPRegular();
-    final bold = await PdfGoogleFonts.notoSansJPBold();
+    final fonts = await WindowsPdfFontService.load();
+    final regular = fonts.regular;
+    final bold = fonts.bold;
     final sortedRows = List<CheckinSheetRow>.from(rows)
       ..sort((first, second) => first.roomNumber.compareTo(second.roomNumber));
     final totalGuests = sortedRows
@@ -89,7 +92,11 @@ class CheckinSheetPrintService {
         pw.Page(
           pageFormat: PdfPageFormat.a4.landscape,
           margin: const pw.EdgeInsets.fromLTRB(18, 16, 18, 14),
-          theme: pw.ThemeData.withFont(base: regular, bold: bold),
+          theme: pw.ThemeData.withFont(
+            base: regular,
+            bold: bold,
+            fontFallback: fonts.fallback,
+          ),
           build: (_) => pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.stretch,
             children: [
@@ -142,7 +149,13 @@ class CheckinSheetPrintService {
                 children: [
                   _headerRow(),
                   for (final row in pageRows)
-                    _dataRow(row, displayedKeys, facilitySettings, rowHeight),
+                    _dataRow(
+                      row,
+                      displayedKeys,
+                      facilitySettings,
+                      rowHeight,
+                      fonts,
+                    ),
                 ],
               ),
               pw.SizedBox(height: 7),
@@ -226,6 +239,7 @@ class CheckinSheetPrintService {
     Set<String> displayedKeys,
     FacilitySettings facilitySettings,
     double rowHeight,
+    WindowsPdfFonts fonts,
   ) {
     final unavailable = !facilitySettings
         .roomByNumber(row.roomNumber)
@@ -253,7 +267,14 @@ class CheckinSheetPrintService {
           bold: true,
           alignment: pw.Alignment.center,
         ),
-        _cell(guestName, height: rowHeight, fontSize: 8.2),
+        _cell(
+          guestName,
+          height: rowHeight,
+          fontSize: 8.2,
+          font: fonts.fontFor(guestName),
+          alignment: pw.Alignment.center,
+          textAlign: pw.TextAlign.center,
+        ),
         _cell(
           unavailable || !row.hasReservation ? '' : '${row.guestCount}',
           height: rowHeight,
@@ -293,7 +314,24 @@ class CheckinSheetPrintService {
           height: rowHeight,
           alignment: pw.Alignment.center,
         ),
-        _cell(row.notes, height: rowHeight, fontSize: 7.2),
+        pw.Container(
+          height: rowHeight,
+          padding: const pw.EdgeInsets.all(3),
+          alignment: pw.Alignment.centerLeft,
+          child: pw.FittedBox(
+            fit: pw.BoxFit.scaleDown,
+            child: pw.SizedBox(
+              width: 100,
+              child: pw.Text(
+                row.notes,
+                style: pw.TextStyle(
+                  fontSize: 7.2,
+                  font: fonts.fontFor(row.notes),
+                ),
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -304,6 +342,8 @@ class CheckinSheetPrintService {
     double fontSize = 8,
     bool bold = false,
     pw.Alignment alignment = pw.Alignment.centerLeft,
+    pw.TextAlign textAlign = pw.TextAlign.left,
+    pw.Font? font,
   }) {
     return pw.Container(
       height: height,
@@ -312,8 +352,10 @@ class CheckinSheetPrintService {
       child: pw.Text(
         value,
         maxLines: 3,
+        textAlign: textAlign,
         style: pw.TextStyle(
           fontSize: fontSize,
+          font: font,
           fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
         ),
       ),

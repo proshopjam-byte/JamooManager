@@ -1,9 +1,13 @@
+import 'print_address_text.dart';
+
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+
+import 'windows_pdf_font_service.dart';
 
 import '../models/reservation.dart';
 
@@ -54,14 +58,19 @@ class CheckinCardPrintService {
 
   Future<Uint8List> _buildPdf(Reservation reservation) async {
     final document = pw.Document();
-    final regular = await PdfGoogleFonts.notoSansJPRegular();
-    final bold = await PdfGoogleFonts.notoSansJPBold();
+    final fonts = await WindowsPdfFontService.load();
+    final regular = fonts.regular;
+    final bold = fonts.bold;
 
     document.addPage(
       pw.Page(
         pageFormat: PdfPageFormat.a5.landscape,
         margin: const pw.EdgeInsets.all(14),
-        theme: pw.ThemeData.withFont(base: regular, bold: bold),
+        theme: pw.ThemeData.withFont(
+          base: regular,
+          bold: bold,
+          fontFallback: fonts.fallback,
+        ),
         build: (_) => pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.stretch,
           children: [
@@ -79,6 +88,7 @@ class CheckinCardPrintService {
                     leftJapanese: '氏名',
                     leftEnglish: 'Name',
                     leftValue: reservation.displayGuestName,
+                    leftValueFont: fonts.fontFor(reservation.displayGuestName),
                     rightJapanese: '性別',
                     rightEnglish: 'Gender',
                     rightValue: '□ 男 Male　　□ 女 Female',
@@ -87,6 +97,7 @@ class CheckinCardPrintService {
                     leftJapanese: '住所',
                     leftEnglish: 'Address',
                     leftValue: _displayAddress(reservation),
+                    leftValueFont: fonts.fontFor(_displayAddress(reservation)),
                     leftValueFontSize: _addressFontSize(reservation),
                     leftValueMaxLines: 2,
                     rightJapanese: '電話番号',
@@ -168,6 +179,8 @@ class CheckinCardPrintService {
     required String rightValue,
     double leftValueFontSize = 9,
     int? leftValueMaxLines,
+    pw.Font? leftValueFont,
+    pw.Font? rightValueFont,
   }) {
     return pw.Container(
       height: 38,
@@ -184,10 +197,11 @@ class CheckinCardPrintService {
               showRightBorder: true,
               fontSize: leftValueFontSize,
               maxLines: leftValueMaxLines,
+              font: leftValueFont,
             ),
           ),
           _labelCell(rightJapanese, rightEnglish),
-          pw.Expanded(child: _valueCell(rightValue)),
+          pw.Expanded(child: _valueCell(rightValue, font: rightValueFont)),
         ],
       ),
     );
@@ -246,6 +260,7 @@ class CheckinCardPrintService {
     bool showRightBorder = false,
     double fontSize = 9,
     int? maxLines,
+    pw.Font? font,
   }) {
     return pw.Container(
       padding: const pw.EdgeInsets.symmetric(horizontal: 7, vertical: 5),
@@ -258,7 +273,7 @@ class CheckinCardPrintService {
       child: pw.Text(
         value,
         maxLines: maxLines,
-        style: pw.TextStyle(fontSize: fontSize),
+        style: pw.TextStyle(fontSize: fontSize, font: font),
       ),
     );
   }
@@ -280,8 +295,8 @@ class CheckinCardPrintService {
   }
 
   static String _displayAddress(Reservation reservation) {
-    final address = reservation.address?.trim() ?? '';
-    var postalCode = reservation.postalCode?.trim() ?? '';
+    final address = normalizePrintAddress(reservation.address ?? '');
+    var postalCode = normalizePrintAddress(reservation.postalCode ?? '');
 
     postalCode = postalCode.replaceFirst(RegExp(r'^〒\s*'), '');
     final digits = postalCode.replaceAll(RegExp(r'[^0-9]'), '');
@@ -318,6 +333,22 @@ class CheckinCardPrintService {
   }
 
   static String _facilityUse(Reservation reservation) {
+    if (reservation.flexibleMeals != null) {
+      final lines = ['breakfast', 'dinner']
+          .map((kind) {
+            final meals = reservation.flexibleMeals!.where(
+              (m) => m.kind == kind,
+            );
+            final count = meals.fold<int>(0, (sum, m) => sum + m.count);
+            final price = meals.fold<int>(0, (sum, m) => sum + m.amount);
+            return '${kind == 'breakfast' ? '朝食' : '夕食'}：滞在中計$count食・追加${_formatYen(price)}';
+          })
+          .join('　');
+      return '予約基本料金：${reservation.priceYen == null ? '未設定' : _formatYen(reservation.priceYen!)}'
+          '　追加食事：${_formatYen(reservation.additionalMealPriceYen)}'
+          '　合計：${_formatYen(reservation.totalPriceYen)}\n'
+          '$lines';
+    }
     final configuredGuests = reservation.breakfastGuestCount;
     final totalGuests =
         reservation.totalGuests ??
